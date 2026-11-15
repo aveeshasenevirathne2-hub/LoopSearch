@@ -1,0 +1,276 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// This security rules file assumes the following data structures:
+//
+// Collection: admins
+// Document ID: {adminUid} (Firebase Auth UID of an approved admin)
+// Notes:
+//   - Managed out-of-band via Firebase Console or Admin SDK only.
+//   - No personal emails, UIDs, or secrets are hardcoded in this file.
+//   - Signed-in users may only get their own /admins/$(request.auth.uid)
+//     document to check dashboard access; listing and all writes are denied.
+// Fields:
+//   - active: bool (required for admin privilege) - Must be true to grant admin access.
+//
+// Collection: users
+// Document ID: {userId} (Firebase Auth UID of a macOS LoopSearch user)
+// Fields (all 12 required; no extraneous fields allowed):
+//   - uid: string (required, immutable) - Must equal userId and request.auth.uid.
+//   - email: string (required, <= 320 chars) - Must match request.auth.token.email when email claim exists.
+//   - displayName: string (required, <= 200 chars) - User display name.
+//   - photoURL: string (required, <= 2048 chars) - Empty string or http(s) avatar URL.
+//   - firstSeenAt: timestamp (required, immutable) - Must equal request.time on create; unchanged on update.
+//   - lastSeenAt: timestamp (required) - Must equal request.time on create and update.
+//   - lastLoginAt: timestamp (required) - Must equal request.time on create and update.
+//   - lastDateKey: string (required, 10 chars, ^[0-9]{4}-[0-9]{2}-[0-9]{2}$) - Date key of last activity.
+//   - loginCount: int (required) - Must equal 1 on create; resource.data.loginCount or +1 on update.
+//   - appVersion: string (required, <= 40 chars) - LoopSearch app version.
+//   - osVersion: string (required, <= 60 chars) - macOS version string.
+//   - lastEventType: string (required) - Must be in ['interactive_sign_in', 'session_resume'].
+//
+// Collection: loginEvents
+// Document ID: {eventId} (append-only login and session resume audit stream)
+// Fields (all 9 required; no extraneous fields allowed):
+//   - uid: string (required) - Must equal request.auth.uid.
+//   - email: string (required, <= 320 chars) - Must match request.auth.token.email when email claim exists.
+//   - displayName: string (required, <= 200 chars) - User display name.
+//   - photoURL: string (required, <= 2048 chars) - Empty string or http(s) avatar URL.
+//   - createdAt: timestamp (required) - Must equal request.time.
+//   - dateKey: string (required, 10 chars, ^[0-9]{4}-[0-9]{2}-[0-9]{2}$) - Date key for event aggregation.
+//   - appVersion: string (required, <= 40 chars) - LoopSearch app version.
+//   - osVersion: string (required, <= 60 chars) - macOS version string.
+//   - eventType: string (required) - Must be in ['interactive_sign_in', 'session_resume'].
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    // Check if the request is authenticated via Firebase Auth
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if the authenticated user owns the target document ID
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Safely inspect the caller's admin document after existence check
+    function hasActiveAdminDoc() {
+      let adminDoc = get(/databases/$(database)/documents/admins/$(request.auth.uid));
+      return adminDoc != null &&
+        'active' in adminDoc.data &&
+        adminDoc.data.active is bool &&
+        adminDoc.data.active == true;
+    }
+
+    // Verify admin membership via out-of-band admins/{uid} allowlist
+    function isAdmin() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        hasActiveAdminDoc();
+    }
+
+    // Verify the document contains all required keys and no extra keys
+    function hasExactFields(data, fields) {
+      return data.keys().hasOnly(fields) && data.keys().hasAll(fields);
+    }
+
+    // Verify immutable fields were not modified during an update
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // Validate URL format (must start with https:// or http://)
+    function isValidUrl(url) {
+      return url is string &&
+        (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    // Validate email format
+    function isValidEmail(email) {
+      return email is string &&
+        email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // Check whether the auth token carries a non-null email claim
+    function hasAuthTokenEmail() {
+      return isAuthenticated() &&
+        'email' in request.auth.token &&
+        request.auth.token.email != null;
+    }
+
+    // Validate email length and bind it to request.auth.token.email when present
+    function isValidUserEmail(email) {
+      return email is string &&
+        email.size() <= 320 &&
+        (
+          (hasAuthTokenEmail() && email == request.auth.token.email) ||
+          (!hasAuthTokenEmail() && (email == "" || isValidEmail(email)))
+        );
+    }
+
+    // Validate photoURL length and safe scheme (or empty string when absent)
+    function isValidPhotoUrl(photoURL) {
+      return photoURL is string &&
+        photoURL.size() <= 2048 &&
+        (photoURL == "" || isValidUrl(photoURL));
+    }
+
+    // Validate YYYY-MM-DD date key format
+    function isValidDateKey(dateKey) {
+      return dateKey is string &&
+        dateKey.size() == 10 &&
+        dateKey.matches("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
+    }
+
+    // Validate permitted telemetry event types
+    function isValidEventType(eventType) {
+      return eventType is string &&
+        eventType in ['interactive_sign_in', 'session_resume'];
+    }
+
+    // ===============================================================
+    // Domain Validators (Used in BOTH create and update)
+    // ===============================================================
+
+    function userAllowedFields() {
+      return [
+        'uid',
+        'email',
+        'displayName',
+        'photoURL',
+        'firstSeenAt',
+        'lastSeenAt',
+        'lastLoginAt',
+        'lastDateKey',
+        'loginCount',
+        'appVersion',
+        'osVersion',
+        'lastEventType'
+      ];
+    }
+
+    function isValidUser(data, userId) {
+      return hasExactFields(data, userAllowedFields()) &&
+        data.uid is string &&
+        data.uid == userId &&
+        data.uid == request.auth.uid &&
+        isValidUserEmail(data.email) &&
+        data.displayName is string &&
+        data.displayName.size() <= 200 &&
+        isValidPhotoUrl(data.photoURL) &&
+        data.firstSeenAt is timestamp &&
+        data.lastSeenAt is timestamp &&
+        data.lastLoginAt is timestamp &&
+        isValidDateKey(data.lastDateKey) &&
+        data.loginCount is int &&
+        data.loginCount >= 1 &&
+        data.appVersion is string &&
+        data.appVersion.size() <= 40 &&
+        data.osVersion is string &&
+        data.osVersion.size() <= 60 &&
+        isValidEventType(data.lastEventType);
+    }
+
+    function isValidUserCreate(data) {
+      return data.firstSeenAt == request.time &&
+        data.lastSeenAt == request.time &&
+        data.lastLoginAt == request.time &&
+        data.loginCount == 1;
+    }
+
+    function isValidUserUpdate(newData, oldData) {
+      return areImmutableFieldsUnchanged(['uid', 'firstSeenAt']) &&
+        newData.uid == oldData.uid &&
+        newData.firstSeenAt == oldData.firstSeenAt &&
+        newData.lastSeenAt == request.time &&
+        newData.lastLoginAt == request.time &&
+        (
+          newData.loginCount == oldData.loginCount + 1 ||
+          newData.loginCount == oldData.loginCount
+        );
+    }
+
+    function loginEventAllowedFields() {
+      return [
+        'uid',
+        'email',
+        'displayName',
+        'photoURL',
+        'createdAt',
+        'dateKey',
+        'appVersion',
+        'osVersion',
+        'eventType'
+      ];
+    }
+
+    function isValidLoginEvent(data) {
+      return hasExactFields(data, loginEventAllowedFields()) &&
+        data.uid is string &&
+        data.uid == request.auth.uid &&
+        isValidUserEmail(data.email) &&
+        data.displayName is string &&
+        data.displayName.size() <= 200 &&
+        isValidPhotoUrl(data.photoURL) &&
+        data.createdAt is timestamp &&
+        data.createdAt == request.time &&
+        isValidDateKey(data.dateKey) &&
+        data.appVersion is string &&
+        data.appVersion.size() <= 40 &&
+        data.osVersion is string &&
+        data.osVersion.size() <= 60 &&
+        isValidEventType(data.eventType);
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // Admin allowlist: managed out-of-band only.
+    // Signed-in users may only check their own membership document.
+    match /admins/{adminUid} {
+      allow get: if isOwner(adminUid);
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    // macOS LoopSearch user profiles (contains PII: email, displayName, photoURL).
+    // Admins can read/list all users; owners can get and maintain only their own doc.
+    match /users/{userId} {
+      allow get: if isAdmin() || isOwner(userId);
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) &&
+        isValidUser(request.resource.data, userId) &&
+        isValidUserCreate(request.resource.data);
+      allow update: if isOwner(userId) &&
+        isValidUser(request.resource.data, userId) &&
+        isValidUserUpdate(request.resource.data, resource.data);
+      allow delete: if false;
+    }
+
+    // Append-only login & session audit stream (contains PII).
+    // Regular users can only append events for themselves; only admins can read/list.
+    match /loginEvents/{eventId} {
+      allow get, list: if isAdmin();
+      allow create: if isAuthenticated() &&
+        isValidLoginEvent(request.resource.data);
+      allow update, delete: if false;
+    }
+
+    // Explicit default-deny fallback for all other collections and subcollections.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

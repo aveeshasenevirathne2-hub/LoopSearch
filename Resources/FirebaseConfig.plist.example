@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>APIKey</key>
+    <string>YOUR_FIREBASE_WEB_API_KEY</string>
+    <key>ProjectID</key>
+    <string>YOUR_FIREBASE_PROJECT_ID</string>
+    <key>DatabaseID</key>
+    <string>(default)</string>
+    <key>GoogleClientID</key>
+    <string>YOUR_GOOGLE_OAUTH_DESKTOP_OR_IOS_CLIENT_ID.apps.googleusercontent.com</string>
+    <key>GoogleClientSecret</key>
+    <string></string>
+    <key>ReversedClientScheme</key>
+    <string></string>
+</dict>
+</plist>
