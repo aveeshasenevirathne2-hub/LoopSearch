@@ -12,3 +12,8 @@ firebase/dashboard/firebase-config.js
 firebase/admins-seed.json
 firebase/.firebase/
 *-debug.log
+LoopSearchWindows/**/bin/
+LoopSearchWindows/**/obj/
+LoopSearchWindows/**/publish/
+*.exe
+*.pdb
