@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const { Icons, applyGlassAppearance, renderOpticalOrbHtml } = window.LoopUI;
+  const { Icons, applyGlassAppearance, renderOpticalOrbHtml, staggerReveal } = window.LoopUI;
   const {
     extractPrimaryURL,
     displayHostForUrl,
@@ -30,8 +30,10 @@
   const historyPopover = document.getElementById('history-popover');
   const histList = document.getElementById('hist-list');
   const resultsSheet = document.getElementById('results-sheet');
+  const overlayRoot = document.getElementById('overlay-root');
   const webview = document.getElementById('lens-webview');
   const wvLoader = document.getElementById('wv-loader');
+  const wvLoadBar = document.getElementById('wv-load-bar');
   const loaderStatusText = document.getElementById('loader-status-text');
   const cropThumb = document.getElementById('crop-thumb');
   const followUpInput = document.getElementById('follow-up-input');
@@ -69,6 +71,10 @@
   let interaction = null; // { kind: 'draw-box'|'draw-free'|'move-box'|'resize-box'|'ocr-drag', startX, startY, corner, origRect }
   let isSearching = false;
   let isOcrRunning = false;
+  let isDismissing = false;
+  let dockedSheetRect = null;
+  let lastSelectionSnap = null;
+  const pointerPos = { x: -100, y: -100, inside: false };
 
   // Current capture artifacts
   let lastCropPngBase64 = '';
@@ -99,6 +105,24 @@
   }));
   const particles = [];
   const ripples = [];
+  const rectRipples = [];
+
+  function dismissOverlayAnimated() {
+    if (isDismissing) return;
+    isDismissing = true;
+    if (overlayRoot) overlayRoot.classList.add('closing');
+    setTimeout(() => window.loopSearch.closeOverlay(), 175);
+  }
+
+  function emitRectShockwave(sel) {
+    if (!sel || !sel.rect) return;
+    rectRipples.push({
+      kind: sel.kind,
+      rect: { ...sel.rect },
+      points: sel.points ? [...sel.points] : null,
+      born: performance.now()
+    });
+  }
 
   function populateStaticIcons() {
     document.getElementById('capsule-brand').innerHTML = Icons.brandMark(18);
@@ -203,21 +227,23 @@
   function renderFullScreenOcrOverlay(lines) {
     ocrLayer.innerHTML = '';
     if (!lines || lines.length === 0) return;
-    for (const line of lines) {
+    lines.forEach((line, idx) => {
       const box = document.createElement('div');
       box.className = 'ocr-word-box';
       box.style.left = `${line.x * screenW - 3}px`;
       box.style.top = `${line.y * screenH - 2}px`;
       box.style.width = `${Math.max(12, line.w * screenW + 6)}px`;
       box.style.height = `${Math.max(14, line.h * screenH + 4)}px`;
+      box.style.animationDelay = `${Math.min(260, idx * 14)}ms`;
       box.title = `Click to copy: ${line.text}`;
       box.onclick = async (e) => {
         e.stopPropagation();
+        emitParticles(e.clientX, e.clientY, 10, 95);
         await window.loopSearch.copyText(line.text);
         window.loopSearch.showToast(`Copied: ${line.text.slice(0, 32)}`, 'success');
       };
       ocrLayer.appendChild(box);
-    }
+    });
   }
 
   function emitParticles(x, y, count = 4, speed = 70) {
@@ -318,40 +344,85 @@
     ctx.lineWidth = 1.65;
     ctx.strokeStyle = '#e0f2fe';
     ctx.stroke();
+
+    // Flowing bright comet spark gliding along perimeter
+    if (rect && rect.w > 24 && rect.h > 24 && kind === 'box') {
+      const p = ((elapsed * 0.42) % 1 + 1) % 1;
+      const perim = 2 * (rect.w + rect.h);
+      let d = p * perim;
+      let cxPt = rect.x;
+      let cyPt = rect.y;
+      if (d < rect.w) {
+        cxPt = rect.x + d;
+        cyPt = rect.y;
+      } else if ((d -= rect.w) < rect.h) {
+        cxPt = rect.x + rect.w;
+        cyPt = rect.y + d;
+      } else if ((d -= rect.h) < rect.w) {
+        cxPt = rect.x + rect.w - d;
+        cyPt = rect.y + rect.h;
+      } else {
+        d -= rect.w;
+        cxPt = rect.x;
+        cyPt = rect.y + rect.h - d;
+      }
+      const cg = ctx.createRadialGradient(cxPt, cyPt, 0.5, cxPt, cyPt, 18);
+      cg.addColorStop(0, '#ffffff');
+      cg.addColorStop(0.35, palette[0]);
+      cg.addColorStop(1, 'transparent');
+      ctx.globalAlpha = 0.92 * intensityMult;
+      ctx.fillStyle = cg;
+      ctx.beginPath();
+      ctx.arc(cxPt, cyPt, 18, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 
   function drawCornerBrackets(ctx, rect, settledAt, now) {
     if (!rect || rect.w < 28 || rect.h < 28) return;
     const dt = Math.max(0, (now - (settledAt || now)) / 1000);
-    const springBoost = dt < 0.5 ? 1 + 0.08 * Math.exp(-dt * 9) * Math.cos(dt * 20) : 1;
-    const pad = -3 * springBoost;
+    const springBoost = dt < 0.55 ? 1 + 0.11 * Math.exp(-dt * 8.5) * Math.cos(dt * 19) : 1;
+    const pad = -3.5 * springBoost;
     const x = rect.x + pad;
     const y = rect.y + pad;
     const w = rect.w - pad * 2;
     const h = rect.h - pad * 2;
-    const len = Math.min(18, Math.min(w, h) * 0.26);
+    const arm = Math.min(22, Math.min(w, h) * 0.28);
+    const r = Math.min(16, arm * 0.72);
+    const breathAlpha = settledAt ? 0.78 + 0.22 * Math.sin(dt * 3.4) : 0.96;
 
     ctx.save();
+    ctx.globalAlpha = breathAlpha;
     ctx.strokeStyle = '#ffffff';
     ctx.shadowColor = '#38bdf8';
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = 10;
     ctx.lineWidth = 2.6;
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
 
-    const corners = [
-      [x, y + len, x, y, x + len, y],
-      [x + w - len, y, x + w, y, x + w, y + len],
-      [x, y + h - len, x, y + h, x + len, y + h],
-      [x + w - len, y + h, x + w, y + h, x + w, y + h - len]
-    ];
-    for (const [x1, y1, cx, cy, x2, y2] of corners) {
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(cx, cy);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-    }
+    ctx.beginPath();
+    // NW
+    ctx.moveTo(x, y + arm);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.lineTo(x + arm, y);
+    // NE
+    ctx.moveTo(x + w - arm, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + arm);
+    // SE
+    ctx.moveTo(x + w, y + h - arm);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + w - arm, y + h);
+    // SW
+    ctx.moveTo(x + arm, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + h - arm);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -364,10 +435,14 @@
 
     fxCtx.clearRect(0, 0, screenW, screenH);
 
-    // 1. Focus-settle corner bezel (0 -> 20px smooth rounding over 0.45s)
-    const settleProgress = Math.min(1, elapsed / 0.42);
+    // 1. Focus-settle corner bezel (0 -> 22px smooth rounding over 0.44s)
+    const settleProgress = Math.min(1, elapsed / 0.44);
     const easeSettle = 1 - Math.pow(1 - settleProgress, 3);
-    const bezelRadius = 20 * easeSettle;
+    const bezelRadius = 22 * easeSettle;
+    if (screenCanvas) {
+      const sScale = 1 + 0.012 * (1 - easeSettle);
+      screenCanvas.style.transform = sScale > 1.0005 ? `scale(${sScale.toFixed(4)})` : '';
+    }
 
     // Subtle twilight tint when idle or spotlight around active selection
     const activeSel =
@@ -456,21 +531,21 @@
       fxCtx.restore();
     }
 
-    // 3. Entry Light Wave Sweep (0.68s upward shimmer wave)
-    if (elapsed < 0.74) {
-      const wp = elapsed / 0.68;
+    // 3. Entry Light Wave Sweep (0.70s translucent upward aurora shimmer)
+    if (elapsed < 0.72) {
+      const wp = elapsed / 0.70;
       const wy = screenH * (1 - wp) - 40;
-      const waveAlpha = Math.sin(Math.min(1, wp) * Math.PI) * 0.48 * intensityMult;
-      const wg = fxCtx.createLinearGradient(0, wy - 90, 0, wy + 90);
+      const waveAlpha = Math.sin(Math.min(1, wp) * Math.PI) * 0.22 * intensityMult;
+      const wg = fxCtx.createLinearGradient(0, wy - 110, 0, wy + 110);
       wg.addColorStop(0, 'transparent');
-      wg.addColorStop(0.42, palette[1]);
-      wg.addColorStop(0.52, '#ffffff');
-      wg.addColorStop(0.62, palette[0]);
+      wg.addColorStop(0.38, palette[1]);
+      wg.addColorStop(0.52, 'rgba(224, 242, 254, 0.28)');
+      wg.addColorStop(0.66, palette[0]);
       wg.addColorStop(1, 'transparent');
       fxCtx.save();
       fxCtx.globalAlpha = Math.max(0, waveAlpha);
       fxCtx.fillStyle = wg;
-      fxCtx.fillRect(0, wy - 90, screenW, 180);
+      fxCtx.fillRect(0, wy - 110, screenW, 220);
       fxCtx.restore();
     }
 
@@ -533,6 +608,50 @@
         fxCtx.fillRect(activeSel.rect.x, by - 26, activeSel.rect.w, 52);
         fxCtx.restore();
       }
+    }
+
+    // 5b. Magnetic Cursor Glow Orb when hovering before drawing
+    if (pointerPos.inside && !interaction && !settledSelection && activeMode !== 'text' && style !== 'stealth') {
+      const orbR = 44;
+      const og = fxCtx.createRadialGradient(pointerPos.x, pointerPos.y, 2, pointerPos.x, pointerPos.y, orbR);
+      og.addColorStop(0, 'rgba(224, 242, 254, 0.24)');
+      og.addColorStop(0.42, 'rgba(56, 189, 248, 0.14)');
+      og.addColorStop(1, 'transparent');
+      fxCtx.save();
+      fxCtx.globalAlpha = 0.85 * intensityMult;
+      fxCtx.fillStyle = og;
+      fxCtx.beginPath();
+      fxCtx.arc(pointerPos.x, pointerPos.y, orbR, 0, Math.PI * 2);
+      fxCtx.fill();
+      fxCtx.restore();
+    }
+
+    // 5c. Selection Shockwave Ripples (Rounded Rect & Freehand)
+    for (let i = rectRipples.length - 1; i >= 0; i--) {
+      const rr = rectRipples[i];
+      const dt = (now - rr.born) / 1000;
+      if (dt > 0.56) {
+        rectRipples.splice(i, 1);
+        continue;
+      }
+      const p = dt / 0.56;
+      const easeOut = 1 - Math.pow(1 - p, 3);
+      const scale = 0.98 + 0.11 * easeOut;
+      const alpha = p < 0.2 ? (p / 0.2) * 0.82 : (1 - (p - 0.2) / 0.8) * 0.82;
+      const cx = rr.rect.x + rr.rect.w / 2;
+      const cy = rr.rect.y + rr.rect.h / 2;
+      fxCtx.save();
+      fxCtx.translate(cx, cy);
+      fxCtx.scale(scale, scale);
+      fxCtx.translate(-cx, -cy);
+      makeSelectionPath(fxCtx, rr.kind, rr.rect, rr.points, true);
+      fxCtx.strokeStyle = palette[0];
+      fxCtx.shadowColor = palette[1];
+      fxCtx.shadowBlur = 12;
+      fxCtx.globalAlpha = Math.max(0, alpha) * intensityMult;
+      fxCtx.lineWidth = Math.max(0.8, 3.4 * (1 - p));
+      fxCtx.stroke();
+      fxCtx.restore();
     }
 
     // 6. Tap Shockwave Ripples
@@ -633,6 +752,7 @@
       const ry = Math.max(12, Math.min(screenH - boxH - 12, y - boxH / 2));
       const rect = { x: rx, y: ry, w: boxW, h: boxH };
       settledSelection = { kind: 'box', rect, points: null, settledAt: performance.now() };
+      emitRectShockwave(settledSelection);
       runSelectionSearch(settledSelection);
       return;
     }
@@ -681,6 +801,9 @@
   fxCanvas.addEventListener('pointermove', (e) => {
     const x = e.clientX;
     const y = e.clientY;
+    pointerPos.x = x;
+    pointerPos.y = y;
+    pointerPos.inside = true;
 
     if (!interaction) {
       if (settledSelection && settledSelection.kind === 'box') {
@@ -736,6 +859,7 @@
       if (selectionRect && selectionRect.w >= 16 && selectionRect.h >= 16) {
         emitParticles(selectionRect.x + selectionRect.w / 2, selectionRect.y + selectionRect.h / 2, 18, 150);
         settledSelection = { kind: 'box', rect: selectionRect, points: null, settledAt: performance.now() };
+        emitRectShockwave(settledSelection);
         runSelectionSearch(settledSelection);
       }
     } else if (act.kind === 'draw-free') {
@@ -749,12 +873,14 @@
             points: [...freehandPoints],
             settledAt: performance.now()
           };
+          emitRectShockwave(settledSelection);
           runSelectionSearch(settledSelection);
         }
       }
     } else if (act.kind === 'move-box' || act.kind === 'resize-box') {
       if (settledSelection) {
         settledSelection.settledAt = performance.now();
+        emitRectShockwave(settledSelection);
         runSelectionSearch(settledSelection);
       }
     }
@@ -819,8 +945,8 @@
 
   function placeResultsSheet(rect) {
     const margin = 18;
-    const sheetW = resultsSheet.offsetWidth || 416;
-    const sheetH = resultsSheet.offsetHeight || 580;
+    const sheetW = resultsSheet.offsetWidth || 440;
+    const sheetH = resultsSheet.offsetHeight || 584;
     const maxY = screenH - (safeInsets.bottom || 0) - 82 - sheetH;
     const clampedY = Math.max(margin + (safeInsets.top || 0), Math.min(maxY, rect.y - 12));
 
@@ -833,8 +959,43 @@
       x = Math.max(margin, Math.min(screenW - sheetW - margin, screenW - sheetW - 24));
     }
 
-    resultsSheet.style.left = `${Math.round(x)}px`;
-    resultsSheet.style.top = `${Math.round(clampedY)}px`;
+    const finalX = Math.round(x);
+    const finalY = Math.round(clampedY);
+    dockedSheetRect = { x: finalX, y: finalY, w: sheetW, h: sheetH };
+
+    const rawDx = (rect.x + rect.w / 2) - (finalX + sheetW / 2);
+    const rawDy = (rect.y + rect.h / 2) - (finalY + sheetH / 2);
+    const fromDx = Math.max(-240, Math.min(240, rawDx * 0.42));
+    const fromDy = Math.max(-180, Math.min(180, rawDy * 0.42));
+    resultsSheet.style.setProperty('--from-dx', `${fromDx.toFixed(1)}px`);
+    resultsSheet.style.setProperty('--from-dy', `${fromDy.toFixed(1)}px`);
+    resultsSheet.style.setProperty('--from-scale', '0.88');
+
+    resultsSheet.style.left = `${finalX}px`;
+    resultsSheet.style.top = `${finalY}px`;
+  }
+
+  function revealResultsSheet(rect) {
+    const wasOpen = resultsSheet.classList.contains('open');
+    if (!wasOpen) {
+      resultsSheet.classList.add('open');
+    }
+    placeResultsSheet(rect);
+    if (!wasOpen) {
+      resultsSheet.style.animation = 'none';
+      void resultsSheet.offsetWidth;
+      resultsSheet.style.animation = '';
+      staggerReveal(
+        [
+          document.getElementById('sheet-header'),
+          document.querySelector('.sheet-hero-bar'),
+          smartChipsBar,
+          document.querySelector('.webview-stage')
+        ],
+        35,
+        36
+      );
+    }
   }
 
   function renderSmartChips({ ocrText, qrPayload, urlMatch, mathResult, colorInfo, isLowInfo }) {
@@ -906,6 +1067,7 @@
     addChip(`${Icons.sparkle(12)}<span>Explain</span>`, () => runExplainAi(), true);
     addChip(`${Icons.pin(12)}<span>Pin</span>`, () => pinCurrentCapture());
     addChip(`${Icons.save(12)}<span>Save</span>`, () => window.loopSearch.saveCapturePng(lastCropPngBase64));
+    staggerReveal(smartChipsBar.children, 24, 24);
 
     if (isLowInfo && !ocrText && !qrPayload) {
       ocrPreviewLine.style.display = 'block';
@@ -917,6 +1079,7 @@
     if (!url) return;
     currentWebUrl = url;
     wvLoader.classList.remove('hidden');
+    if (wvLoadBar) wvLoadBar.classList.remove('hidden');
     loaderStatusText.textContent = 'Loading results...';
     webview.src = url;
   }
@@ -932,8 +1095,7 @@
     cropThumb.src = cropped.pngDataUrl;
     aiAnswerCard.style.display = 'none';
     ocrPreviewLine.style.display = 'none';
-    resultsSheet.classList.add('open');
-    placeResultsSheet(sel.rect);
+    revealResultsSheet(sel.rect);
 
     const qrPayload = window.loopSearch.decodeQr(cropped.rgba.data, cropped.sw, cropped.sh);
     const colorInfo = extractDominantColor(cropped.rgba.data, cropped.sw, cropped.sh);
@@ -1056,20 +1218,49 @@
     } catch {}
   }
 
+  function syncBackBtnState() {
+    const backBtn = document.getElementById('sheet-back-btn');
+    if (!backBtn) return;
+    let canGo = false;
+    try { canGo = webview.canGoBack(); } catch {}
+    backBtn.style.opacity = canGo ? '1' : '0.35';
+    backBtn.style.pointerEvents = canGo ? 'auto' : 'none';
+  }
+  syncBackBtnState();
+
+  webview.addEventListener('did-start-loading', () => {
+    if (wvLoadBar) wvLoadBar.classList.remove('hidden');
+  });
   webview.addEventListener('dom-ready', syncWebviewTheme);
   webview.addEventListener('did-navigate', (e) => {
     currentWebUrl = e.url;
+    syncBackBtnState();
     syncWebviewTheme();
   });
   webview.addEventListener('did-stop-loading', () => {
-    if (!isMockDemo) wvLoader.classList.add('hidden');
+    syncBackBtnState();
+    if (!isMockDemo) {
+      wvLoader.classList.add('hidden');
+      if (wvLoadBar) wvLoadBar.classList.add('hidden');
+    }
   });
+
+  smartChipsBar.addEventListener(
+    'wheel',
+    (e) => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && smartChipsBar.scrollWidth > smartChipsBar.clientWidth) {
+        e.preventDefault();
+        smartChipsBar.scrollLeft += e.deltaY;
+      }
+    },
+    { passive: false }
+  );
 
   // Capsule & Sheet UI buttons
   document.querySelectorAll('.mode-pill').forEach((btn) => {
     btn.onclick = () => setMode(btn.dataset.mode);
   });
-  document.getElementById('cap-close-btn').onclick = () => window.loopSearch.closeOverlay();
+  document.getElementById('cap-close-btn').onclick = () => dismissOverlayAnimated();
   document.getElementById('cap-studio-btn').onclick = () => window.loopSearch.openWindow('settings');
   document.getElementById('cap-history-btn').onclick = async () => {
     historyPopover.classList.toggle('open');
@@ -1103,8 +1294,7 @@
       row.onclick = () => {
         historyPopover.classList.remove('open');
         if (item.thumbnailDataUrl) cropThumb.src = item.thumbnailDataUrl;
-        resultsSheet.classList.add('open');
-        placeResultsSheet({ x: 80, y: 120, w: 280, h: 200 });
+        revealResultsSheet({ x: 80, y: 120, w: 280, h: 200 });
         if (item.lensUrl) navigateWebview(item.lensUrl);
       };
       histList.appendChild(row);
@@ -1137,8 +1327,21 @@
   };
   document.getElementById('sheet-expand-btn').onclick = () => {
     sheetExpanded = !sheetExpanded;
-    resultsSheet.style.width = sheetExpanded ? '540px' : '416px';
-    resultsSheet.style.height = sheetExpanded ? `${Math.min(720, screenH - 120)}px` : '580px';
+    resultsSheet.classList.add('resetting');
+    resultsSheet.style.width = sheetExpanded ? '556px' : '440px';
+    resultsSheet.style.height = sheetExpanded ? `${Math.min(720, screenH - 120)}px` : '584px';
+    setTimeout(() => resultsSheet.classList.remove('resetting'), 380);
+  };
+  document.getElementById('sheet-grab-pill').ondblclick = (e) => {
+    e.stopPropagation();
+    if (!dockedSheetRect) return;
+    sheetExpanded = false;
+    resultsSheet.classList.add('resetting');
+    resultsSheet.style.left = `${dockedSheetRect.x}px`;
+    resultsSheet.style.top = `${dockedSheetRect.y}px`;
+    resultsSheet.style.width = '440px';
+    resultsSheet.style.height = '584px';
+    setTimeout(() => resultsSheet.classList.remove('resetting'), 380);
   };
   document.getElementById('sheet-close-btn').onclick = () => {
     resultsSheet.classList.remove('open');
@@ -1231,7 +1434,7 @@
       return;
     }
     if (e.key === 'Escape') {
-      window.loopSearch.closeOverlay();
+      dismissOverlayAnimated();
     } else if (e.key === '1') {
       setMode('box');
     } else if (e.key === '2') {

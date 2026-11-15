@@ -20,24 +20,47 @@
     .google-btn {
       margin-top: 8px;
       width: 100%;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      background: rgba(255, 255, 255, 0.08);
+      border-radius: 11px;
+      border: 1px solid rgba(186, 230, 253, 0.28);
+      background: rgba(255, 255, 255, 0.085);
       color: var(--text-primary);
-      padding: 8px 12px;
+      padding: 9px 12px;
       font-family: var(--font-sans);
       font-size: 12.5px;
-      font-weight: 600;
+      font-weight: 620;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
-      transition: all 0.2s var(--spring-snappy);
+      transition: transform 0.22s var(--spring-snappy), background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
     }
     .google-btn:hover {
-      background: rgba(255, 255, 255, 0.14);
-      border-color: rgba(56, 189, 248, 0.5);
+      background: rgba(56, 189, 248, 0.16);
+      border-color: rgba(125, 211, 252, 0.56);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(37, 99, 235, 0.24);
+    }
+    .google-btn:active {
+      transform: scale(0.96);
+    }
+    .google-spinner {
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      border: 2px solid rgba(125, 211, 252, 0.28);
+      border-top-color: #38bdf8;
+      animation: spinCW 0.75s linear infinite;
+    }
+    .auth-error-msg {
+      margin-top: 6px;
+      padding: 6px 10px;
+      border-radius: 9px;
+      background: rgba(248, 113, 113, 0.14);
+      border: 1px solid rgba(248, 113, 113, 0.34);
+      color: #fca5a5;
+      font-size: 11.4px;
+      line-height: 1.4;
     }
     .creator-card {
       display: flex;
@@ -46,19 +69,35 @@
       gap: 10px;
       padding: 10px 14px;
     }
+    .creator-links {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
     .mini-link {
-      font-size: 11.5px;
-      font-weight: 600;
-      color: var(--accent-primary);
-      background: rgba(56, 189, 248, 0.10);
-      border: 1px solid rgba(56, 189, 248, 0.28);
+      font-size: 11px;
+      font-weight: 620;
+      color: #7dd3fc;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.30);
       border-radius: 999px;
-      padding: 4px 10px;
+      padding: 4px 9px;
       cursor: pointer;
+      white-space: nowrap;
       text-decoration: none;
+      transition: transform 0.18s var(--spring-snappy), background 0.18s ease, border-color 0.18s ease;
     }
     .mini-link:hover {
-      background: rgba(56, 189, 248, 0.20);
+      background: rgba(56, 189, 248, 0.24);
+      border-color: rgba(125, 211, 252, 0.56);
+      transform: translateY(-1px);
+    }
+    .mini-link:active { transform: scale(0.94); }
+    #hotkey-presets { gap: 5px; }
+    #hotkey-presets .chip-btn {
+      padding: 4px 9px;
+      font-size: 11px;
     }
   </style>
 </head>
@@ -134,11 +173,11 @@
 
           <!-- Creator Card -->
           <div class="glass-card creator-card">
-            <div>
-              <div style="font-size:12.5px;font-weight:650;">Built by Aveesha Senevirathne</div>
-              <div style="font-size:11.2px;color:var(--text-secondary);">Open-source Windows &amp; macOS Circle to Search</div>
+            <div style="min-width:0;">
+              <div style="font-size:12.5px;font-weight:660;">Built by Aveesha Senevirathne</div>
+              <div style="font-size:11px;color:var(--text-secondary);">Open-source Windows &amp; macOS Circle to Search</div>
             </div>
-            <div style="display:flex;gap:6px;">
+            <div class="creator-links">
               <button class="mini-link" id="open-studio-btn">Studio</button>
               <button class="mini-link" id="open-github-btn">GitHub</button>
               <button class="mini-link" id="open-x-btn">@AveeshaSen</button>
@@ -163,16 +202,18 @@
   <script src="./js/motion-and-glass.js"></script>
   <script>
     (function () {
-      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars } = window.LoopUI;
+      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars, staggerReveal } = window.LoopUI;
       document.getElementById('brand-icon').innerHTML = Icons.brandMark(24);
       document.getElementById('close-btn').innerHTML = Icons.close(13);
       document.getElementById('try-icon').innerHTML = Icons.sparkle(14);
       initHorizonLightWell(document.getElementById('glass-shell'));
-      initDialogStars(document.getElementById('stars-canvas'), 20);
+      initDialogStars(document.getElementById('stars-canvas'), 22);
+      staggerReveal('.scroll-body .glass-card', 40, 48);
 
       let currentSettings = null;
       let currentAuth = { signedIn: false };
       let signingIn = false;
+      let authError = '';
 
       async function renderAll() {
         const [settings, auth, presets] = await Promise.all([
@@ -209,34 +250,43 @@
         const tryLabel = document.getElementById('try-label');
 
         if (auth && auth.signedIn) {
+          authError = '';
           badge.textContent = 'Connected ✓';
           badge.classList.add('success');
           desc.textContent = `Signed in as ${auth.displayName || auth.email} (${auth.email})`;
           slot.innerHTML = '';
           tryLabel.textContent = 'Try LoopSearch Now';
         } else {
-          badge.textContent = 'Sign-In Required';
+          badge.textContent = signingIn ? 'Browser Open…' : 'Sign-In Required';
           badge.classList.remove('success');
-          desc.textContent = 'Connect your Google account once to unlock overlay search & cloud sync.';
+          desc.textContent = signingIn
+            ? 'Finish signing in via your browser tab — LoopSearch will connect automatically.'
+            : 'Connect your Google account once to unlock overlay search & cloud sync.';
           slot.innerHTML = `
             <button class="google-btn" id="google-signin-btn">
-              ${Icons.googleG(15)}
+              ${signingIn ? '<span class="google-spinner"></span>' : Icons.googleG(15)}
               <span>${signingIn ? 'Waiting for browser sign-in...' : 'Continue with Google'}</span>
-            </button>`;
+            </button>
+            ${authError ? `<div class="auth-error-msg">${authError}</div>` : ''}`;
           document.getElementById('google-signin-btn').onclick = triggerSignIn;
-          tryLabel.textContent = 'Sign In & Start';
+          tryLabel.textContent = signingIn ? 'Waiting for Sign-In...' : 'Sign In & Start';
         }
       }
 
       async function triggerSignIn() {
         if (signingIn) return;
         signingIn = true;
+        authError = '';
         updateUi(currentSettings, currentAuth, null);
         try {
           const res = await window.loopSearch.signInWithGoogle();
           if (res && res.ok) {
             currentAuth = res.auth;
+          } else if (res && res.error) {
+            authError = res.error;
           }
+        } catch (err) {
+          authError = err && err.message ? err.message : 'Sign-in did not complete.';
         } finally {
           signingIn = false;
           renderAll();

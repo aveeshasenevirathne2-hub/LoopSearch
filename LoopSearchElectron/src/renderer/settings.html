@@ -200,26 +200,36 @@
   <script src="./js/motion-and-glass.js"></script>
   <script>
     (function () {
-      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars, renderOpticalOrbHtml } = window.LoopUI;
+      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars, renderOpticalOrbHtml, staggerReveal, initSegmentedThumb } = window.LoopUI;
       document.getElementById('brand-icon').innerHTML = Icons.brandMark(24);
       document.getElementById('close-btn').innerHTML = Icons.close(13);
       document.getElementById('preview-orb-slot').innerHTML = renderOpticalOrbHtml(true);
       initHorizonLightWell(document.getElementById('glass-shell'));
-      initDialogStars(document.getElementById('stars-canvas'), 16);
+      initDialogStars(document.getElementById('stars-canvas'), 18);
+      const syncTabThumb = initSegmentedThumb(document.getElementById('tabs'));
+      staggerReveal('#tab-general > .glass-card', 24, 28);
 
       let settings = null;
       let auth = null;
       let presets = [];
       let recordingHotkey = false;
 
-      // Tabs
+      // Tabs with sliding glass indicator & staggered card cascade
       document.querySelectorAll('#tabs button').forEach((btn) => {
         btn.onclick = () => {
           document.querySelectorAll('#tabs button').forEach((b) => b.classList.remove('active'));
           btn.classList.add('active');
+          if (syncTabThumb) syncTabThumb();
           const tab = btn.dataset.tab;
           document.querySelectorAll('.tab-panel').forEach((p) => {
-            p.style.display = p.id === `tab-${tab}` ? 'flex' : 'none';
+            const active = p.id === `tab-${tab}`;
+            p.style.display = active ? 'flex' : 'none';
+            if (active) {
+              p.classList.remove('tab-panel-enter');
+              void p.offsetWidth;
+              p.classList.add('tab-panel-enter');
+              staggerReveal(p.querySelectorAll('.glass-card, .studio-preview'), 10, 26);
+            }
           });
         };
       });
@@ -241,6 +251,7 @@
       }
 
       function renderAll(s, a) {
+        if (syncTabThumb) requestAnimationFrame(syncTabThumb);
         if (s) {
           settings = s;
           applyGlassAppearance(s);

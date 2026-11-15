@@ -881,10 +881,15 @@ async function runUiScreenshotVerification(outDir) {
 
   const waitLoaded = (win) =>
     new Promise((resolve) => {
+      const done = () => {
+        if (win.isVisible()) return resolve();
+        win.once('show', resolve);
+        setTimeout(resolve, 400);
+      };
       if (win.webContents.isLoadingMainFrame()) {
-        win.webContents.once('did-finish-load', resolve);
+        win.webContents.once('did-finish-load', done);
       } else {
-        resolve();
+        done();
       }
     });
 
@@ -900,13 +905,13 @@ async function runUiScreenshotVerification(outDir) {
 
   const studioWin = openManagedWindow('settings');
   await waitLoaded(studioWin);
-  await wait(650);
+  await wait(700);
   fs.writeFileSync(path.join(outDir, '02-settings.png'), (await studioWin.webContents.capturePage()).toPNG());
   await studioWin.webContents.executeJavaScript("document.querySelector('[data-tab=\"appearance\"]').click()");
-  await wait(350);
+  await wait(520);
   fs.writeFileSync(path.join(outDir, '02b-settings-glass.png'), (await studioWin.webContents.capturePage()).toPNG());
   await studioWin.webContents.executeJavaScript("document.querySelector('[data-tab=\"ai\"]').click()");
-  await wait(350);
+  await wait(520);
   fs.writeFileSync(path.join(outDir, '02c-settings-ai.png'), (await studioWin.webContents.capturePage()).toPNG());
   if (!studioWin.isDestroyed()) studioWin.close();
 

@@ -163,39 +163,166 @@ function extractLensResultUrlFromHtml(html) {
 }
 
 /**
- * Injects obsidian dark theme CSS into non-CAPTCHA webview pages with live MutationObserver.
+ * Injects obsidian dark theme CSS + Google Lens chrome cleanup (eliminates double input boxes,
+ * cobalt link highlight blocks, empty top spacers, and right-edge thumbnail clipping).
  */
 function buildLensDarkThemeInjectionScript(enableDark) {
   const darkCss = `
-    :root { color-scheme: dark !important; }
-    html, body {
-      background: #0b0e18 !important;
-      color: #e8ecf6 !important;
+    :root, html, body {
+      color-scheme: dark !important;
+      background-color: #090e1a !important;
+      color: #edf2fb !important;
     }
-    header, nav, footer, [role="navigation"], [role="main"], [role="region"], [role="dialog"],
-    .g, .MjjYud, .ULSxyf, .kp-blk, .osrp-blk, .G19kLd, .c2xzTb, .xpdopen, .TbwUpd {
+    code, pre, kbd, samp, tt {
+      background-color: rgba(30, 44, 72, 0.86) !important;
+      color: #d6e8ff !important;
+      border-color: rgba(130, 175, 255, 0.24) !important;
+    }
+    mark, mark * {
+      background-color: rgba(56, 189, 248, 0.14) !important;
+      color: #edf2fb !important;
+      border-radius: 4px !important;
+    }
+    code *, pre *, kbd *, samp * {
       background-color: transparent !important;
-      color: #e8ecf6 !important;
-      border-color: rgba(255,255,255,0.10) !important;
+      color: inherit !important;
     }
-    input, textarea, [role="search"], .RNNXgb {
-      background: #14192a !important;
-      color: #f8fafc !important;
-      border-color: rgba(148,163,184,0.28) !important;
+    table, th, td, blockquote, details, summary {
+      background-color: rgba(17, 25, 42, 0.86) !important;
+      color: #edf2fb !important;
+      border-color: rgba(130, 175, 255, 0.18) !important;
     }
-    a, a:link { color: #70b7ff !important; }
-    a:visited { color: #a78bfa !important; }
-    span, p, div, h1, h2, h3, h4, li { color: inherit; }
-    img, picture, video, canvas, svg { filter: none !important; }
+    input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([type="range"]),
+    textarea {
+      background-color: transparent !important;
+      background-image: none !important;
+      color: #edf2fb !important;
+      caret-color: #5cb8ff !important;
+      border-color: transparent !important;
+      box-shadow: none !important;
+      outline: none !important;
+    }
+    input::placeholder, textarea::placeholder { color: #93a7c4 !important; }
+    a, a * { color: #7cc4ff !important; }
+    a:not([role="button"]), a:not([role="button"]) * {
+      background-color: transparent !important;
+      background-image: none !important;
+    }
+    svg { color: #a8caf5; }
+    img, picture, video, canvas { filter: none !important; }
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.35); border-radius: 3px; }
   `.replace(/\s+/g, ' ');
 
+  const cleanCss = `
+    header, #searchform, form[action="/search"], [role="search"],
+    #sfcnt, #tophf,
+    div[data-hveid] input[aria-label*="Add to your search"],
+    div[jscontroller] > div > a[aria-label="Google"],
+    div[aria-label="Add to your search"],
+    hr, [role="separator"] {
+      display: none !important;
+    }
+    html, body {
+      width: 100% !important;
+      max-width: 100% !important;
+      padding-top: 2px !important;
+      margin-top: 0 !important;
+      overflow-x: hidden !important;
+      box-sizing: border-box !important;
+    }
+    main, [role="main"], c-wiz, form {
+      max-width: 100% !important;
+      min-width: 0 !important;
+      box-sizing: border-box !important;
+    }
+    img, video, svg { max-width: 100% !important; }
+    c-wiz img:not(a[href] img), [role="main"] img:not(a[href] img) {
+      object-fit: contain !important;
+    }
+    div[data-attrid], div[data-hveid], section, c-wiz {
+      margin-bottom: 4px !important;
+    }
+    a, [role="button"], button, div[data-hveid] > div, g-card, .g {
+      transition: transform 0.20s cubic-bezier(0.22, 1, 0.36, 1),
+                  box-shadow 0.22s ease,
+                  background-color 0.18s ease,
+                  border-color 0.18s ease,
+                  opacity 0.18s ease !important;
+    }
+    a img {
+      transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), filter 0.20s ease !important;
+    }
+    a:hover img {
+      transform: scale(1.028) !important;
+      filter: brightness(1.06) !important;
+    }
+    g-card:hover, div[jsaction] a:hover {
+      border-color: rgba(74, 194, 255, 0.34) !important;
+    }
+  `.replace(/\s+/g, ' ');
+
+  const cleanJs = `
+    function runCleanPass() {
+      if (!document.body) return;
+      var walker = document.querySelectorAll('input, span, div');
+      for (var i = 0; i < walker.length; i++) {
+        var el = walker[i];
+        var txt = (el.getAttribute('placeholder') || el.getAttribute('aria-label') || '').toLowerCase();
+        if (txt.indexOf('add to your search') !== -1) {
+          var box = el.closest('form') || el.closest('[role="search"]') || el.parentElement;
+          if (box && box.offsetHeight < 120) box.style.setProperty('display', 'none', 'important');
+        }
+      }
+      var allDivs = document.querySelectorAll('div, section, nav');
+      for (var j = 0; j < allDivs.length; j++) {
+        var d = allDivs[j];
+        var rect = d.getBoundingClientRect();
+        var textTrim = (d.innerText || '').trim();
+        if (rect.top >= -12 && rect.top < 140 && rect.height >= 10 && rect.height <= 180) {
+          var hasMedia = d.querySelector('img, svg, canvas, video, input, textarea, [role="tab"], [role="button"], button, a');
+          if (textTrim.length === 0 && !hasMedia) {
+            d.style.setProperty('display', 'none', 'important');
+            d.style.setProperty('height', '0px', 'important');
+            d.style.setProperty('margin', '0px', 'important');
+            d.style.setProperty('padding', '0px', 'important');
+          }
+        }
+      }
+    }
+  `.replace(/\s+/g, ' ');
+
   if (!enableDark) {
     return `(function(){
+      var u = location.href.toLowerCase();
+      if (u.includes('/sorry') || u.includes('recaptcha') || u.includes('accounts.google.') || u.includes('consent.google.')) return;
+      window.__loopsearchDarkEnabled = false;
       var el = document.getElementById('__loopsearch_dark_css');
       if (el) el.remove();
-      if (window.__loopsearchDarkObs) { window.__loopsearchDarkObs.disconnect(); window.__loopsearchDarkObs = null; }
+      if (window.__loopsearchDarkObs) {
+        window.__loopsearchDarkObs.disconnect();
+        window.__loopsearchDarkObs = null;
+      }
+      var ce = document.getElementById('__loopsearch_clean_css');
+      if (!ce && (document.head || document.documentElement)) {
+        ce = document.createElement('style');
+        ce.id = '__loopsearch_clean_css';
+        ce.textContent = ${JSON.stringify(cleanCss)};
+        (document.head || document.documentElement).appendChild(ce);
+      }
+      var bgEls = document.querySelectorAll('[data-cts-dark-bg]');
+      for (var i = 0; i < bgEls.length; i++) {
+        bgEls[i].style.removeProperty('background-color');
+        bgEls[i].style.removeProperty('border-color');
+        bgEls[i].removeAttribute('data-cts-dark-bg');
+      }
+      var fgEls = document.querySelectorAll('[data-cts-dark-fg]');
+      for (var j = 0; j < fgEls.length; j++) {
+        fgEls[j].style.removeProperty('color');
+        fgEls[j].removeAttribute('data-cts-dark-fg');
+      }
+      ${cleanJs}
+      runCleanPass();
     })();`;
   }
 
@@ -206,20 +333,79 @@ function buildLensDarkThemeInjectionScript(enableDark) {
       if (prev) prev.remove();
       return;
     }
-    function ensureStyle(){
+    window.__loopsearchDarkEnabled = true;
+    document.documentElement.style.colorScheme = 'dark';
+    function ensureStyle(id, css){
       if (!document.head && !document.documentElement) return;
-      var style = document.getElementById('__loopsearch_dark_css');
+      var style = document.getElementById(id);
       if (!style) {
         style = document.createElement('style');
-        style.id = '__loopsearch_dark_css';
-        style.textContent = ${JSON.stringify(darkCss)};
+        style.id = id;
+        style.textContent = css;
         (document.head || document.documentElement).appendChild(style);
       }
     }
-    ensureStyle();
+    ${cleanJs}
+    function applyDarkPass(){
+      if (!window.__loopsearchDarkEnabled || !document.body) return;
+      ensureStyle('__loopsearch_dark_css', ${JSON.stringify(darkCss)});
+      ensureStyle('__loopsearch_clean_css', ${JSON.stringify(cleanCss)});
+      runCleanPass();
+      var skipTags = { IMG:1, VIDEO:1, CANVAS:1, PICTURE:1, SOURCE:1, SVG:1, PATH:1, CIRCLE:1, RECT:1, POLYGON:1, SCRIPT:1, STYLE:1, LINK:1, META:1, NOSCRIPT:1, BR:1, HR:1, CODE:1, PRE:1, KBD:1, SAMP:1, MARK:1 };
+      var all = document.body.getElementsByTagName('*');
+      var vw = window.innerWidth || 420;
+      for (var i = 0; i < all.length; i++) {
+        var el = all[i];
+        if (skipTags[el.tagName]) continue;
+        var cs = window.getComputedStyle(el);
+        var bgi = cs.backgroundImage;
+        if (bgi && bgi.indexOf('gradient(') !== -1 && bgi.indexOf('url(') === -1 && /(255|248|249|250|241|243|244|238|232|229)/.test(bgi)) {
+          if ((el.textContent || '').trim().length < 36 || el.querySelector('img') === null) {
+            el.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(9, 14, 26, 0), rgba(9, 14, 26, 0.96))', 'important');
+          }
+        }
+        var bg = cs.backgroundColor;
+        if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+          var m = bg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?\\)/);
+          if (m) {
+            var r = +m[1], g = +m[2], b = +m[3], a = m[4] !== undefined ? +m[4] : 1;
+            if ((el.tagName === 'SPAN' || el.tagName === 'EM') && a > 0.15 && b > 135 && (b - r) > 38 && g < 195) {
+              var wrapsLink = el.querySelector('a') !== null || el.closest('a') !== null;
+              el.style.setProperty('background-color', wrapsLink ? 'transparent' : 'rgba(56, 189, 248, 0.14)', 'important');
+              el.setAttribute('data-cts-dark-bg', '1');
+            } else if (a > 0.12 && r > 155 && g > 155 && b > 155) {
+              var isRoot = (el.tagName === 'BODY' || el.tagName === 'MAIN');
+              el.style.setProperty('background-color', isRoot ? '#090e1a' : 'rgba(17, 25, 42, 0.92)', 'important');
+              if (parseFloat(cs.borderTopWidth) > 0.2) el.style.setProperty('border-color', 'rgba(130, 175, 255, 0.16)', 'important');
+              el.setAttribute('data-cts-dark-bg', '1');
+            } else if (a > 0.72 && Math.max(r, g, b) <= 52 && (Math.max(r, g, b) - Math.min(r, g, b)) <= 10) {
+              if (el.getBoundingClientRect().width >= vw * 0.84) {
+                el.style.setProperty('background-color', '#090e1a', 'important');
+                el.setAttribute('data-cts-dark-bg', '1');
+              }
+            }
+          }
+        }
+        var fg = cs.color;
+        if (fg) {
+          var fm = fg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+          if (fm && Math.max(+fm[1], +fm[2], +fm[3]) < 168) {
+            var isSecondary = Math.min(+fm[1], +fm[2], +fm[3]) > 78;
+            el.style.setProperty('color', isSecondary ? '#b6c7df' : '#edf2fb', 'important');
+            el.setAttribute('data-cts-dark-fg', '1');
+          }
+        }
+      }
+    }
+    applyDarkPass();
     if (!window.__loopsearchDarkObs && document.documentElement) {
-      window.__loopsearchDarkObs = new MutationObserver(ensureStyle);
-      window.__loopsearchDarkObs.observe(document.documentElement, { childList: true });
+      var queued = false;
+      window.__loopsearchDarkObs = new MutationObserver(function(){
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(function(){ queued = false; applyDarkPass(); });
+      });
+      window.__loopsearchDarkObs.observe(document.documentElement, { childList: true, subtree: true });
     }
   })();`;
 }

@@ -63,11 +63,12 @@
   <script src="./js/motion-and-glass.js"></script>
   <script>
     (function () {
-      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars } = window.LoopUI;
+      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars, staggerReveal } = window.LoopUI;
       document.getElementById('about-logo').innerHTML = Icons.brandMark(40);
       document.getElementById('close-btn').innerHTML = Icons.close(13);
       initHorizonLightWell(document.getElementById('glass-shell'));
-      initDialogStars(document.getElementById('stars-canvas'), 18);
+      initDialogStars(document.getElementById('stars-canvas'), 20);
+      staggerReveal('.about-center > *', 30, 44);
 
       let settings = null;
       window.loopSearch.getSettings().then((s) => {

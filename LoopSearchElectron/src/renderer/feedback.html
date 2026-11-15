@@ -73,11 +73,12 @@
   <script src="./js/motion-and-glass.js"></script>
   <script>
     (function () {
-      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars } = window.LoopUI;
+      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars, staggerReveal } = window.LoopUI;
       document.getElementById('brand-icon').innerHTML = Icons.brandMark(24);
       document.getElementById('close-btn').innerHTML = Icons.close(13);
       initHorizonLightWell(document.getElementById('glass-shell'));
-      initDialogStars(document.getElementById('stars-canvas'), 14);
+      initDialogStars(document.getElementById('stars-canvas'), 16);
+      staggerReveal('.scroll-body .glass-card', 40, 46);
 
       let rating = 5;
       let category = 'Feature Request';

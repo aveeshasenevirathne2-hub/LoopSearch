@@ -1,134 +1,239 @@
-(function (root) {
+(function () {
   'use strict';
 
-  const LoopIcons = {
-    brandMark: (size = 24) => `
-      <svg width="${size}" height="${size}" viewBox="0 0 32 32" fill="none">
+  const Icons = {
+    brandMark(size = 20) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
         <defs>
-          <linearGradient id="lsRing" x1="4" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stop-color="#e0f2fe"/>
-            <stop offset="45%" stop-color="#38bdf8"/>
-            <stop offset="100%" stop-color="#60a5fa"/>
+          <linearGradient id="ls-g" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#38bdf8"/>
+            <stop offset="50%" stop-color="#60a5fa"/>
+            <stop offset="100%" stop-color="#2563eb"/>
           </linearGradient>
         </defs>
-        <circle cx="14.5" cy="14.5" r="8.2" stroke="url(#lsRing)" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="40 12"/>
-        <circle cx="14.5" cy="14.5" r="3.4" fill="#7dd3fc" fill-opacity="0.9"/>
-        <path d="M20.8 20.8L26.5 26.5" stroke="url(#lsRing)" stroke-width="2.8" stroke-linecap="round"/>
-      </svg>`,
-    close: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>`,
-    back: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>`,
-    search: (size = 15) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>`,
-    box: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V6a2 2 0 0 1 2-2h3M15 4h3a2 2 0 0 1 2 2v3M20 15v3a2 2 0 0 1-2 2h-3M9 20H6a2 2 0 0 1-2-2v-3"/><rect x="8" y="8" width="8" height="8" rx="1.5" stroke-dasharray="2 2"/></svg>`,
-    lasso: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4c5 0 8.5 2.8 8.5 6.8 0 4-3.7 7.2-8.7 7.2-4.8 0-8.3-2.9-8.3-6.7C3.5 7.2 7.2 4 12 4z"/><path d="M9 18c0 1.8 1.5 2.8 3.2 2.8 1.8 0 2.6-1 2.2-2.6"/></svg>`,
-    tap: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.5" stroke-dasharray="3 3"/></svg>`,
-    text: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h12M4 17h9"/><rect x="15" y="13" width="6" height="6" rx="1"/></svg>`,
-    sparkle: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9L12 3z"/><path d="M19 3v3M20.5 4.5h-3"/></svg>`,
-    copy: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
-    pin: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>`,
-    save: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
-    moon: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`,
-    sun: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>`,
-    external: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>`,
-    gear: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
-    history: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>`,
-    expand: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`,
-    send: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>`,
-    translate: (size = 13) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2h1"/><path d="M22 22l-5-10-5 10M14 18h6"/></svg>`,
-    check: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
-    star: (size = 18, filled = false) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
-    googleG: (size = 15) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24"><path fill="#EA4335" d="M12 10.2v3.9h5.4c-.2 1.2-1.5 3.6-5.4 3.6-3.2 0-5.9-2.7-5.9-6s2.7-6 5.9-6c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.8 3.2 14.6 2.3 12 2.3 6.7 2.3 2.4 6.6 2.4 11.9S6.7 21.5 12 21.5c6.9 0 9.6-4.8 9.6-7.3 0-.5-.1-.9-.1-1.3H12z"/><path fill="#4285F4" d="M21.5 12.9c0-.5-.1-.9-.1-1.3H12v3.9h5.4c-.5 1.5-1.9 3.6-5.4 3.6v2.4c6.9 0 9.5-4.8 9.5-8.6z"/><path fill="#FBBC05" d="M6.1 13.7c-.2-.6-.4-1.2-.4-1.8s.1-1.2.4-1.8V7.4H3.6C2.8 8.8 2.4 10.3 2.4 11.9s.4 3.1 1.2 4.5l2.5-2.7z"/><path fill="#34A853" d="M12 17.9c-2.6 0-4.8-1.7-5.9-4.2l-2.5 2.7c1.6 3 4.8 5.1 8.4 5.1 3.4 0 6.2-1.2 8-3.2l-2.6-2.5c-1.4 1.3-3.2 2.1-5.4 2.1z"/></svg>`
+        <path d="M11 3.5a7.5 7.5 0 1 0 5.3 12.8l3.6 3.6" stroke="url(#ls-g)" stroke-width="2.4" stroke-linecap="round"/>
+        <circle cx="11" cy="11" r="3.1" fill="#e0f2fe" fill-opacity="0.9"/>
+      </svg>`;
+    },
+    close(size = 13) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+    },
+    sparkle(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.1 6.3L20.4 10l-6.3 2.1L12 18.4l-2.1-6.3L3.6 10l6.3-2.1L12 2zm7 12 1.1 3.1L23 18l-2.9.9L19 22l-1.1-3.1L15 18l2.9-.9L19 14z"/></svg>`;
+    },
+    box(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/></svg>`;
+    },
+    lasso(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 18c-3-1.4-4.5-4-4-6.8C3.7 7 8 4.5 13 5c4.7.5 8 3.6 7.5 7.4-.5 3.6-4.2 6.1-8.5 5.8-2.2-.2-3.8-1-4.8-2"/><circle cx="7" cy="18" r="2.2"/></svg>`;
+    },
+    tap(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2.5" fill="currentColor"/><circle cx="12" cy="12" r="6.2" stroke-opacity="0.75"/><circle cx="12" cy="12" r="9.5" stroke-dasharray="3 3" stroke-opacity="0.5"/></svg>`;
+    },
+    text(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M12 6v13M8 19h8"/></svg>`;
+    },
+    history(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>`;
+    },
+    gear(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 0 1 0 4h-.09c-.66 0-1.25.4-1.51 1z"/></svg>`;
+    },
+    back(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
+    },
+    moon(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>`;
+    },
+    sun(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`;
+    },
+    pin(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>`;
+    },
+    external(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`;
+    },
+    expand(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 3 6 0 0 6M9 21 3 21 3 15M21 3l-7 7M3 21l7-7"/></svg>`;
+    },
+    send(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>`;
+    },
+    search(size = 13) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`;
+    },
+    copy(size = 13) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+    },
+    translate(size = 13) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6M4 14l6-6 2-3M2 5h12M7 2h1M22 22l-5-10-5 10M14 18h6"/></svg>`;
+    },
+    save(size = 13) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>`;
+    },
+    check(size = 14) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+    },
+    googleG(size = 15) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.5 5.5 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3a7.2 7.2 0 0 1-10.7-3.8H1.4v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.4 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.4a12 12 0 0 0 0 10.8l4-3.1z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4C18 1.2 15.2 0 12 0A12 12 0 0 0 1.4 6.6l4 3.1A7.2 7.2 0 0 1 12 4.8z"/></svg>`;
+    },
+    star(size = 24, filled = true) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+    }
   };
 
   function applyGlassAppearance(settings) {
     if (!settings) return;
-    const rootEl = document.documentElement;
-    rootEl.setAttribute('data-theme', settings.effectiveTheme || 'dark');
-    rootEl.setAttribute('data-glow', settings.glowTheme || 'apple');
-    rootEl.setAttribute('data-intensity', settings.glowIntensity || 'balanced');
-    rootEl.setAttribute('data-style', settings.visualStylePreset || 'crystal');
-    rootEl.setAttribute('data-motion', settings.motionFeel || 'crisp');
+    const root = document.documentElement;
+    root.dataset.theme = settings.effectiveTheme || (settings.theme === 'light' ? 'light' : 'dark');
+    root.dataset.glow = settings.glowTheme || 'apple';
+    root.dataset.intensity = settings.glowIntensity || 'balanced';
+    root.dataset.style = settings.visualStylePreset || 'crystal';
+    root.dataset.motion = settings.motionFeel || 'crisp';
   }
 
-  function initHorizonLightWell(containerEl) {
-    if (!containerEl) return;
-    let targetX = 50;
-    let currentX = 50;
-    let rafId = null;
-
-    const tick = () => {
-      currentX += (targetX - currentX) * 0.14;
-      containerEl.style.setProperty('--hx', `${currentX.toFixed(2)}%`);
-      if (Math.abs(targetX - currentX) > 0.08) {
-        rafId = requestAnimationFrame(tick);
-      } else {
-        rafId = null;
-      }
-    };
-
-    window.addEventListener('pointermove', (e) => {
-      const rect = containerEl.getBoundingClientRect();
-      if (rect.width <= 0) return;
-      targetX = Math.max(15, Math.min(85, ((e.clientX - rect.left) / rect.width) * 100));
-      if (!rafId) rafId = requestAnimationFrame(tick);
+  function initHorizonLightWell(shellEl) {
+    if (!shellEl) return;
+    shellEl.addEventListener('pointermove', (e) => {
+      const rect = shellEl.getBoundingClientRect();
+      if (!rect.width) return;
+      const pct = Math.max(12, Math.min(88, ((e.clientX - rect.left) / rect.width) * 100));
+      shellEl.style.setProperty('--horizon-x', `${pct.toFixed(1)}%`);
+    });
+    shellEl.addEventListener('pointerleave', () => {
+      shellEl.style.removeProperty('--horizon-x');
     });
   }
 
-  function initDialogStars(canvasEl, count = 18) {
+  function initSpecularInteractive(rootEl = document) {
+    if (!rootEl || rootEl.__loopSpecularBound) return;
+    rootEl.__loopSpecularBound = true;
+    rootEl.addEventListener('pointermove', (e) => {
+      const target = e.target.closest('.glass-card, .btn-primary, .btn-glass, .chip-btn, .smart-chip, .mode-pill, .google-btn');
+      if (!target) return;
+      const r = target.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      target.style.setProperty('--mx', `${(e.clientX - r.left).toFixed(1)}px`);
+      target.style.setProperty('--my', `${(e.clientY - r.top).toFixed(1)}px`);
+    });
+  }
+
+  function staggerReveal(selectorOrEls, baseDelayMs = 35, stepDelayMs = 44) {
+    const els =
+      typeof selectorOrEls === 'string'
+        ? Array.from(document.querySelectorAll(selectorOrEls))
+        : Array.from(selectorOrEls || []);
+    els.forEach((el, idx) => {
+      if (!el || !el.style) return;
+      el.classList.remove('stagger-animate');
+      void el.offsetWidth;
+      el.style.setProperty('--stagger-delay', `${baseDelayMs + idx * stepDelayMs}ms`);
+      el.classList.add('stagger-animate');
+    });
+  }
+
+  function initSegmentedThumb(segmentedEl) {
+    if (!segmentedEl) return null;
+    let thumb = segmentedEl.querySelector('.segmented-thumb');
+    if (!thumb) {
+      thumb = document.createElement('div');
+      thumb.className = 'segmented-thumb';
+      segmentedEl.prepend(thumb);
+    }
+    const sync = () => {
+      const active = segmentedEl.querySelector('button.active') || segmentedEl.querySelector('button');
+      if (!active) return;
+      const left = active.offsetLeft;
+      thumb.style.width = `${active.offsetWidth}px`;
+      thumb.style.transform = `translateX(${Math.max(0, left - 4)}px)`;
+    };
+    requestAnimationFrame(sync);
+    window.addEventListener('resize', sync);
+    return sync;
+  }
+
+  function initDialogStars(canvasEl, count = 20) {
     if (!canvasEl) return;
     const ctx = canvasEl.getContext('2d');
-    const stars = Array.from({ length: count }, (_, i) => ({
+    const stars = Array.from({ length: count }, () => ({
       x: Math.random(),
       y: Math.random(),
-      r: 0.7 + (i % 3) * 0.45,
+      r: 2.0 + Math.random() * 2.8,
       phase: Math.random() * Math.PI * 2,
-      speed: 0.8 + Math.random() * 1.1
+      speed: 1.1 + Math.random() * 1.4,
+      vy: 0.008 + Math.random() * 0.014
     }));
 
-    const resize = () => {
+    function resize() {
       const rect = canvasEl.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       canvasEl.width = Math.max(1, Math.round(rect.width * dpr));
       canvasEl.height = Math.max(1, Math.round(rect.height * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
+    }
     resize();
     window.addEventListener('resize', resize);
 
-    let start = performance.now();
-    const draw = (now) => {
+    const start = performance.now();
+    function tick(now) {
       const t = (now - start) / 1000;
       const rect = canvasEl.getBoundingClientRect();
-      ctx.clearRect(0, 0, rect.width, rect.height);
-      const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-      const baseAlpha = isLight ? 0.18 : 0.45;
+      const w = rect.width;
+      const h = rect.height;
+      ctx.clearRect(0, 0, w, h);
+
+      const isDark = (document.documentElement.dataset.theme || 'dark') === 'dark';
       for (const s of stars) {
-        const a = (0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase))) * baseAlpha;
-        ctx.fillStyle = isLight ? `rgba(14,165,233,${a})` : `rgba(186,230,253,${a})`;
-        const px = s.x * rect.width;
-        const py = s.y * rect.height;
+        const sx = s.x * w;
+        const sy = (((s.y - t * s.vy) % 1) + 1) % 1 * h;
+        const a = (0.18 + 0.82 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase))) * (isDark ? 0.56 : 0.28);
+        const r = s.r;
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.fillStyle = isDark ? '#bae6fd' : '#0284c7';
+        ctx.shadowColor = isDark ? '#38bdf8' : 'transparent';
+        ctx.shadowBlur = isDark ? 6 : 0;
         ctx.beginPath();
-        ctx.arc(px, py, s.r, 0, Math.PI * 2);
+        ctx.moveTo(sx, sy - r);
+        ctx.quadraticCurveTo(sx, sy, sx + r, sy);
+        ctx.quadraticCurveTo(sx, sy, sx, sy + r);
+        ctx.quadraticCurveTo(sx, sy, sx - r, sy);
+        ctx.quadraticCurveTo(sx, sy, sx, sy - r);
         ctx.fill();
+        ctx.restore();
       }
-      requestAnimationFrame(draw);
-    };
-    requestAnimationFrame(draw);
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
   }
 
-  function renderOpticalOrbHtml(small = false) {
-    return `
-      <div class="optical-orb ${small ? 'sm' : ''}">
-        <div class="optical-orb-halo"></div>
-        <div class="optical-orb-inner"></div>
-        <div class="optical-orb-core">${LoopIcons.search(small ? 14 : 20)}</div>
-      </div>`;
+  function renderOpticalOrbHtml(compact = false) {
+    return `<div class="optical-orb${compact ? ' compact' : ''}">
+      <div class="orb-halo"></div>
+      <div class="orb-ripple"></div>
+      <div class="orb-ripple r2"></div>
+      <div class="orb-ripple r3"></div>
+      <div class="orb-ring-outer"></div>
+      <div class="orb-ring-inner"></div>
+      <div class="orb-core"></div>
+      <div class="orb-spark"></div>
+      <div class="orb-spark s2"></div>
+    </div>`;
   }
 
-  root.LoopUI = {
-    Icons: LoopIcons,
+  document.addEventListener('DOMContentLoaded', () => {
+    initSpecularInteractive(document);
+  });
+
+  window.LoopUI = {
+    Icons,
     applyGlassAppearance,
     initHorizonLightWell,
+    initSpecularInteractive,
+    staggerReveal,
+    initSegmentedThumb,
     initDialogStars,
     renderOpticalOrbHtml
   };
-})(window);
+})();

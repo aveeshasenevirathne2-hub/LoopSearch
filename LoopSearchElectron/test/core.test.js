@@ -19,7 +19,8 @@ const {
   ALLOWED_EVENT_TYPES,
   formatOsVersion,
   getUtcDateKey,
-  buildFirestoreCommitWrites
+  buildFirestoreCommitWrites,
+  FirebaseAuthService
 } = require('../src/main/firebaseAuth');
 
 const {
@@ -186,6 +187,9 @@ test('Lens & GitHub helper functions', () => {
 
   const script = buildLensDarkThemeInjectionScript(true);
   assert.ok(script.includes("u.includes('/sorry')"));
+  assert.ok(script.includes('background-color: transparent !important'));
+  assert.ok(script.includes('__loopsearch_clean_css'));
+  assert.ok(script.includes('a:not([role='));
   assert.equal(compareSemver('1.0.4', '1.0.3'), 1);
   assert.equal(compareSemver('1.0.3', '1.0.3'), 0);
 
@@ -197,4 +201,66 @@ test('Lens & GitHub helper functions', () => {
     osVersion: 'Windows 11'
   });
   assert.ok(issueUrl.startsWith('https://github.com/aveeshasenevirathne2-hub/LoopSearch/issues/new?'));
+});
+
+test('FirebaseAuthService loopback callback handles /oauth2/callback, favicon 204, and state mismatch 400', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ls-auth-test-'));
+  try {
+    const store = new SettingsStore(tmpDir, 'test-auth-seed-456');
+    let openedUrl = null;
+    const auth = new FirebaseAuthService({
+      vault: store.vault,
+      appVersion: '1.0.3',
+      telemetryDisabled: true,
+      openExternal: (url) => {
+        openedUrl = url;
+      }
+    });
+
+    auth._exchangeWithIdentityToolkit = async (postBody) => {
+      assert.ok(postBody.includes('id_token=fake-id-token-xyz'));
+      assert.ok(postBody.includes('providerId=google.com'));
+      return {
+        uid: 'uid-win-1',
+        email: 'win@example.com',
+        displayName: 'Windows Tester',
+        photoURL: '',
+        idToken: 'exchanged-jwt',
+        refreshToken: 'refresh-xyz',
+        expiresAt: Date.now() + 3600 * 1000
+      };
+    };
+
+    const signInPromise = auth.startInteractiveSignIn(10000);
+
+    // Wait until openExternal receives the loopback port & state
+    const startedAt = Date.now();
+    while (!openedUrl && Date.now() - startedAt < 3000) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.ok(openedUrl, 'openExternal must be called with auth URL');
+    const authParsed = new URL(openedUrl);
+    const port = authParsed.searchParams.get('port');
+    const state = authParsed.searchParams.get('state');
+    assert.ok(port && state);
+
+    const faviconResp = await fetch(`http://127.0.0.1:${port}/favicon.ico`);
+    assert.equal(faviconResp.status, 204);
+
+    const mismatchResp = await fetch(`http://127.0.0.1:${port}/oauth2/callback?state=wrong&id_token=fake`);
+    assert.equal(mismatchResp.status, 400);
+
+    const okResp = await fetch(
+      `http://127.0.0.1:${port}/oauth2/callback?state=${encodeURIComponent(state)}&id_token=fake-id-token-xyz`
+    );
+    assert.equal(okResp.status, 200);
+    const html = await okResp.text();
+    assert.ok(html.includes('LoopSearch Connected'));
+
+    const publicState = await signInPromise;
+    assert.equal(publicState.signedIn, true);
+    assert.equal(publicState.email, 'win@example.com');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });

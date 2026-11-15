@@ -245,11 +245,23 @@ class FirebaseAuthService {
       const server = http.createServer(async (req, res) => {
         try {
           const url = new URL(req.url || '/', 'http://127.0.0.1');
-          if (url.pathname === '/auth-callback' || url.pathname === '/callback' || url.pathname === '/') {
+          const pathname = url.pathname.replace(/\/+$/, '') || '/';
+          if (pathname === '/favicon.ico') {
+            res.writeHead(204);
+            res.end();
+            return;
+          }
+          if (
+            pathname === '/oauth2/callback' ||
+            pathname === '/auth-callback' ||
+            pathname === '/callback' ||
+            pathname === '/'
+          ) {
             const state = url.searchParams.get('state') || '';
             const errMsg = url.searchParams.get('error');
             const idToken = url.searchParams.get('id_token') || url.searchParams.get('idToken');
             const accessToken = url.searchParams.get('access_token') || url.searchParams.get('accessToken');
+            const refreshToken = url.searchParams.get('refresh_token') || url.searchParams.get('refreshToken');
             const oauthCode = url.searchParams.get('code');
 
             if (state !== expectedState) {
@@ -263,7 +275,7 @@ class FirebaseAuthService {
               finish(new Error(errMsg));
               return;
             }
-            if (!idToken && !accessToken && !oauthCode) {
+            if (!idToken && !accessToken && !oauthCode && !refreshToken) {
               res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
               res.end(buildAuthResultHtml(false, 'Missing Google credentials. Please return to LoopSearch and try again.'));
               return;
@@ -272,13 +284,21 @@ class FirebaseAuthService {
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end(buildAuthResultHtml(true, 'You are signed in! You can close this browser tab and return to LoopSearch.'));
 
-            const postParts = [];
-            if (idToken) postParts.push(`id_token=${encodeURIComponent(idToken)}`);
-            if (accessToken) postParts.push(`access_token=${encodeURIComponent(accessToken)}`);
-            if (oauthCode) postParts.push(`code=${encodeURIComponent(oauthCode)}`);
-            postParts.push('providerId=google.com');
-
-            const session = await this._exchangeWithIdentityToolkit(postParts.join('&'));
+            let session = null;
+            if (idToken || accessToken || oauthCode) {
+              const postParts = [];
+              if (idToken) postParts.push(`id_token=${encodeURIComponent(idToken)}`);
+              if (accessToken) postParts.push(`access_token=${encodeURIComponent(accessToken)}`);
+              if (oauthCode) postParts.push(`code=${encodeURIComponent(oauthCode)}`);
+              postParts.push('providerId=google.com');
+              session = await this._exchangeWithIdentityToolkit(postParts.join('&'));
+            }
+            if (!session && refreshToken) {
+              session = await this._exchangeRefreshToken(refreshToken);
+            }
+            if (!session) {
+              throw new Error('Could not complete Google sign-in token exchange.');
+            }
             this._session = session;
             this.vault.set('firebaseSession', session);
             await this._recordEventWithFallback('interactive_sign_in');
@@ -342,6 +362,37 @@ class FirebaseAuthService {
       refreshToken: data.refreshToken,
       expiresAt: Date.now() + Math.max(60, expiresInSec - 120) * 1000
     };
+  }
+
+  async _exchangeRefreshToken(refreshToken) {
+    const resp = await fetch(
+      `https://securetoken.googleapis.com/v1/token?key=${FIREBASE_CONFIG.apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken
+        }).toString()
+      }
+    );
+    const data = await resp.json();
+    if (!resp.ok || !data.id_token || !data.user_id) {
+      throw new Error(data?.error?.message || `Refresh token exchange failed (${resp.status})`);
+    }
+    const expiresInSec = Number(data.expires_in || 3600);
+    const session = {
+      uid: data.user_id,
+      email: '',
+      displayName: '',
+      photoURL: '',
+      idToken: data.id_token,
+      refreshToken: data.refresh_token || refreshToken,
+      expiresAt: Date.now() + Math.max(60, expiresInSec - 120) * 1000
+    };
+    this._session = session;
+    await this.refreshUserProfile().catch(() => {});
+    return this._session;
   }
 
   async ensureFreshToken() {
