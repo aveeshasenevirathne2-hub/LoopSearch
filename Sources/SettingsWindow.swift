@@ -68,6 +68,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             ctx.timingFunction = AppleMotion.easeOut
             content.animator().alphaValue = 1.0
         }
+        content.animateVisibleCardsIn()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -238,6 +239,7 @@ private final class SettingsContentView: NSView {
     }()
     private let headerAccentLayer = CAGradientLayer()
     private var mainStackRef: NSStackView?
+    private weak var scrollViewRef: NSScrollView?
     private var headerRowRef: NSView?
 
     private var modeSegment: LiquidGlassSegmentedControl!
@@ -274,6 +276,13 @@ private final class SettingsContentView: NSView {
     private var authSignOutBtn: LiquidGlassButton!
     nonisolated(unsafe) private var authObserver: NSObjectProtocol?
 
+    private var updateBannerCard: LiquidGlassSurfaceView!
+    private var updateBannerTitleLabel: NSTextField!
+    private var updateBannerDetailLabel: NSTextField!
+    private var updateBannerActionBtn: LiquidGlassButton!
+    private var updatesHeaderBtn: LiquidGlassButton!
+    nonisolated(unsafe) private var updateObserver: NSObjectProtocol?
+
     private var historyCountLabel: NSTextField!
     private var historyListStack: NSStackView!
     private var clearInlineHistoryBtn: LiquidGlassButton!
@@ -308,6 +317,16 @@ private final class SettingsContentView: NSView {
                 self?.refreshAuthCard()
             }
         }
+
+        updateObserver = NotificationCenter.default.addObserver(
+            forName: .loopSearchUpdateChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshUpdateBanner(animated: true)
+            }
+        }
     }
 
     deinit {
@@ -316,6 +335,9 @@ private final class SettingsContentView: NSView {
         }
         if let authObserver {
             NotificationCenter.default.removeObserver(authObserver)
+        }
+        if let updateObserver {
+            NotificationCenter.default.removeObserver(updateObserver)
         }
     }
 
@@ -485,8 +507,9 @@ private final class SettingsContentView: NSView {
             foregroundColor: .labelColor,
             font: .systemFont(ofSize: 11, weight: .medium)
         ) {
-            AppUpdateChecker.shared.checkForUpdates(interactive: true)
+            AppUpdateChecker.shared.installOrOpenAvailableUpdate()
         }
+        updatesHeaderBtn = updatesBtn
 
         let aboutBtn = LiquidGlassButton(
             symbol: "info.circle",
@@ -525,6 +548,7 @@ private final class SettingsContentView: NSView {
         scrollView.borderType = .noBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(scrollView)
+        scrollViewRef = scrollView
 
         let docView = FlippedDocumentView()
         docView.translatesAutoresizingMaskIntoConstraints = false
@@ -566,6 +590,10 @@ private final class SettingsContentView: NSView {
             footerRow.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -22),
             footerRow.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -14)
         ])
+
+        updateBannerCard = makeUpdateAvailableBanner()
+        mainStack.addArrangedSubview(updateBannerCard)
+        updateBannerCard.widthAnchor.constraint(equalTo: mainStack.widthAnchor).isActive = true
 
         // SECTION 0: GOOGLE ACCOUNT
         addSectionHeader("GOOGLE ACCOUNT", to: mainStack)
@@ -784,6 +812,117 @@ private final class SettingsContentView: NSView {
 
         refreshAuthCard()
         refreshHotkeyUI()
+        refreshUpdateBanner(animated: false)
+    }
+
+    func animateVisibleCardsIn() {
+        layoutSubtreeIfNeeded()
+        scrollViewRef?.contentView.scroll(.zero)
+        if let contentView = scrollViewRef?.contentView {
+            scrollViewRef?.reflectScrolledClipView(contentView)
+        }
+        guard let stack = mainStackRef else { return }
+        let cards = stack.arrangedSubviews.filter { !$0.isHidden && $0 is LiquidGlassSurfaceView }
+        AppleMotion.staggeredCardsReveal(Array(cards.prefix(7)), baseDelay: 0.02, stepDelay: 0.032)
+    }
+
+    private func makeUpdateAvailableBanner() -> LiquidGlassSurfaceView {
+        let card = LiquidGlassSurfaceView(
+            cornerRadius: 14,
+            style: .regular,
+            tintColor: NSColor(red: 0.07, green: 0.30, blue: 0.68, alpha: 0.30),
+            lightTintColor: NSColor(red: 0.14, green: 0.46, blue: 0.94, alpha: 0.14)
+        )
+        card.horizonGlowIntensity = 0.72
+        card.horizonPoolHeightFraction = 0.56
+        card.horizonRimStrength = 0.95
+        card.isHidden = true
+        card.translatesAutoresizingMaskIntoConstraints = false
+
+        let logo = LoopBrandLogoView(size: 30)
+        logo.translatesAutoresizingMaskIntoConstraints = false
+
+        updateBannerTitleLabel = NSTextField(labelWithString: "Update Available")
+        updateBannerTitleLabel.font = .systemFont(ofSize: 12.5, weight: .bold)
+        updateBannerTitleLabel.textColor = .labelColor
+
+        updateBannerDetailLabel = NSTextField(labelWithString: "A new version of LoopSearch is ready to install.")
+        updateBannerDetailLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        updateBannerDetailLabel.textColor = .secondaryLabelColor
+        updateBannerDetailLabel.lineBreakMode = .byTruncatingTail
+
+        let textCol = NSStackView(views: [updateBannerTitleLabel, updateBannerDetailLabel])
+        textCol.orientation = .vertical
+        textCol.alignment = .leading
+        textCol.spacing = 1
+        textCol.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        updateBannerActionBtn = LiquidGlassButton(
+            symbol: "arrow.down.circle.fill",
+            symbolPointSize: 11,
+            symbolWeight: .semibold,
+            title: "Install Update",
+            tooltip: "Download and install the latest LoopSearch release",
+            height: 28,
+            minWidth: 118,
+            style: .clear,
+            foregroundColor: .white,
+            font: .systemFont(ofSize: 11.5, weight: .semibold)
+        ) {
+            AppUpdateChecker.shared.installOrOpenAvailableUpdate()
+        }
+        updateBannerActionBtn.setSelectedAccent(true)
+        updateBannerActionBtn.setContentHuggingPriority(.required, for: .horizontal)
+
+        let row = NSStackView(views: [logo, textCol, updateBannerActionBtn])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+        row.translatesAutoresizingMaskIntoConstraints = false
+        card.contentContainer.addSubview(row)
+
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: card.contentContainer.leadingAnchor, constant: 12),
+            row.trailingAnchor.constraint(equalTo: card.contentContainer.trailingAnchor, constant: -12),
+            row.topAnchor.constraint(equalTo: card.contentContainer.topAnchor, constant: 10),
+            row.bottomAnchor.constraint(equalTo: card.contentContainer.bottomAnchor, constant: -10)
+        ])
+
+        return card
+    }
+
+    private func refreshUpdateBanner(animated: Bool) {
+        if let update = AppUpdateChecker.shared.availableUpdate {
+            updateBannerTitleLabel.stringValue = "Update Available — LoopSearch v\(update.version)"
+            let noteSnippet = update.notes
+                .replacingOccurrences(of: "#", with: "")
+                .replacingOccurrences(of: "*", with: "")
+                .split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first(where: { !$0.isEmpty }) ?? "New improvements and fixes ready to install."
+            updateBannerDetailLabel.stringValue = "Current v\(AppUpdateChecker.currentVersion) • \(noteSnippet)"
+            updateBannerActionBtn.title = "Install v\(update.version)"
+            updatesHeaderBtn?.title = "Update v\(update.version)"
+            updatesHeaderBtn?.setSelectedAccent(true)
+            if updateBannerCard.isHidden {
+                if animated {
+                    AppleMotion.animateVisibility(updateBannerCard, visible: true, scale: 0.96, duration: 0.24)
+                } else {
+                    updateBannerCard.isHidden = false
+                    updateBannerCard.alphaValue = 1.0
+                }
+            }
+        } else {
+            updatesHeaderBtn?.title = "Updates"
+            updatesHeaderBtn?.setSelectedAccent(false)
+            if !updateBannerCard.isHidden {
+                if animated {
+                    AppleMotion.animateVisibility(updateBannerCard, visible: false, scale: 0.96, duration: 0.20)
+                } else {
+                    updateBannerCard.isHidden = true
+                }
+            }
+        }
     }
 
     private func makeGoogleAccountCard() -> NSView {
@@ -838,7 +977,7 @@ private final class SettingsContentView: NSView {
         nameRow.alignment = .firstBaseline
         nameRow.spacing = 8
 
-        authDetailLabel = NSTextField(labelWithString: "Sign in with Google to unlock LoopSearch.")
+        authDetailLabel = NSTextField(labelWithString: "Sign in with Google to use LoopSearch.")
         authDetailLabel.font = .systemFont(ofSize: 11, weight: .regular)
         authDetailLabel.textColor = .secondaryLabelColor
         authDetailLabel.lineBreakMode = .byTruncatingMiddle
@@ -890,12 +1029,20 @@ private final class SettingsContentView: NSView {
             OnboardingWindowController.shared.show()
         }
 
+        authPrimaryBtn.setContentHuggingPriority(.required, for: .horizontal)
+        authSignOutBtn.setContentHuggingPriority(.required, for: .horizontal)
+
         let actionRow = NSStackView(views: [authPrimaryBtn, authSignOutBtn])
         actionRow.orientation = .horizontal
         actionRow.alignment = .centerY
         actionRow.spacing = 6
+        actionRow.setContentHuggingPriority(.required, for: .horizontal)
+        actionRow.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        let row = NSStackView(views: [avatarBox, textCol, actionRow])
+        let accountSpacer = NSView()
+        accountSpacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+
+        let row = NSStackView(views: [avatarBox, textCol, accountSpacer, actionRow])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 10
@@ -1132,7 +1279,7 @@ private final class SettingsContentView: NSView {
             title: "Record Shortcut…",
             tooltip: "Click and press any modifier + key combination",
             height: 25,
-            minWidth: 128,
+            minWidth: 148,
             style: .clear,
             tintColor: NSColor(red: 0.06, green: 0.20, blue: 0.44, alpha: 0.72),
             lightTintColor: NSColor(red: 0.84, green: 0.90, blue: 0.98, alpha: 0.80),
@@ -1141,6 +1288,8 @@ private final class SettingsContentView: NSView {
         ) { [weak self] in
             self?.toggleShortcutRecording()
         }
+        recordShortcutButton.setContentHuggingPriority(.required, for: .horizontal)
+        hotkeyValueLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         let topSpacer = NSView()
         topSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -2951,15 +3100,41 @@ final class AboutWindowController: NSObject {
     static let shared = AboutWindowController()
 
     private var window: NSWindow?
+    private var checkUpdatesBtnRef: LiquidGlassButton?
+    private var updateStatusLabelRef: NSTextField?
+    nonisolated(unsafe) private var updateObserver: NSObjectProtocol?
+
+    deinit {
+        if let updateObserver {
+            NotificationCenter.default.removeObserver(updateObserver)
+        }
+    }
+
+    private func refreshUpdateUI() {
+        guard let btn = checkUpdatesBtnRef, let badge = updateStatusLabelRef else { return }
+        if let update = AppUpdateChecker.shared.availableUpdate {
+            btn.title = "Update Available: Install v\(update.version)"
+            btn.setSelectedAccent(true)
+            badge.stringValue = "New version v\(update.version) ready on GitHub Releases"
+            badge.textColor = NSColor(red: 0.36, green: 0.86, blue: 1.0, alpha: 1.0)
+            badge.isHidden = false
+            AppleMotion.springPop(btn, scale: 1.04)
+        } else {
+            btn.title = "Check for Updates"
+            btn.setSelectedAccent(false)
+            badge.isHidden = true
+        }
+    }
 
     func show() {
         if let existing = window {
+            refreshUpdateUI()
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let rect = NSRect(x: 0, y: 0, width: 396, height: 356)
+        let rect = NSRect(x: 0, y: 0, width: 404, height: 376)
         let win = NSWindow(
             contentRect: rect,
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -2998,6 +3173,12 @@ final class AboutWindowController: NSObject {
         ver.font = .systemFont(ofSize: 11.5, weight: .medium)
         ver.textColor = .secondaryLabelColor
 
+        let updateStatus = NSTextField(labelWithString: "")
+        updateStatus.font = .systemFont(ofSize: 11, weight: .semibold)
+        updateStatus.alignment = .center
+        updateStatus.isHidden = true
+        updateStatusLabelRef = updateStatus
+
         let desc = NSTextField(labelWithString: "Draw a box, freehand loop, or tap anything on screen for instant on-device Vision OCR, AI answers, subject lifting, and visual search.")
         desc.font = .systemFont(ofSize: 11.5, weight: .regular)
         desc.textColor = .labelColor
@@ -3018,13 +3199,14 @@ final class AboutWindowController: NSObject {
             symbolWeight: .semibold,
             title: "Check for Updates",
             tooltip: "Check GitHub Releases for a newer version",
-            height: 26,
+            height: 27,
             style: .clear,
             foregroundColor: .labelColor,
             font: .systemFont(ofSize: 11, weight: .medium)
         ) {
-            AppUpdateChecker.shared.checkForUpdates(interactive: true)
+            AppUpdateChecker.shared.installOrOpenAvailableUpdate()
         }
+        checkUpdatesBtnRef = checkUpdatesBtn
 
         let disclaimer = NSTextField(labelWithString: "Independent macOS application • Not affiliated with, endorsed by, or sponsored by Google LLC.")
         disclaimer.font = .systemFont(ofSize: 10.5, weight: .semibold)
@@ -3034,7 +3216,7 @@ final class AboutWindowController: NSObject {
         disclaimer.cell?.wraps = true
         disclaimer.preferredMaxLayoutWidth = 336
 
-        let stack = NSStackView(views: [logo, name, ver, credit, desc, supportButtons, checkUpdatesBtn, disclaimer])
+        let stack = NSStackView(views: [logo, name, ver, updateStatus, credit, desc, supportButtons, checkUpdatesBtn, disclaimer])
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 8
@@ -3049,9 +3231,22 @@ final class AboutWindowController: NSObject {
         ])
 
         win.contentView = card
+        refreshUpdateUI()
+        if updateObserver == nil {
+            updateObserver = NotificationCenter.default.addObserver(
+                forName: .loopSearchUpdateChanged,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.refreshUpdateUI()
+                }
+            }
+        }
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         self.window = win
+        AppleMotion.staggeredCardsReveal([logo, name, credit, desc, supportButtons, checkUpdatesBtn], baseDelay: 0.02, stepDelay: 0.03)
     }
 }
 
@@ -3162,8 +3357,12 @@ final class FeedbackWindowController {
                 style: .clear,
                 foregroundColor: NSColor(red: 1.0, green: 0.82, blue: 0.34, alpha: 1.0)
             ) { [weak self] in
-                self?.selectedStars = idx
-                self?.refreshUI()
+                guard let self else { return }
+                self.selectedStars = idx
+                self.refreshUI()
+                if self.starButtons.indices.contains(idx - 1) {
+                    AppleMotion.springPop(self.starButtons[idx - 1], scale: 1.16, dampingRatio: 0.60, response: 0.28)
+                }
             }
         }
         let starsRow = NSStackView(views: starButtons)

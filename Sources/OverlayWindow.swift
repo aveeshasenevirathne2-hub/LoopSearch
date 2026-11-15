@@ -2806,7 +2806,7 @@ private final class GooglePromptCapsuleView: NSView, NSGestureRecognizerDelegate
 
         let isFirstLaunchHint = !AppSettings.shared.hasShownFirstToolbarHint
         let hintString = isFirstLaunchHint
-            ? "✦ First launch tip: Press 1–4 for modes • Hold ⌥ for Box • Esc to cancel"
+            ? "First launch: press 1–4 to switch modes, hold ⌥ for Box, Esc to cancel"
             : "Press 1–4 to switch mode • Esc to cancel"
         let escHintLabel = NSTextField(labelWithString: hintString)
         escHintLabel.font = .systemFont(ofSize: 10.5, weight: isFirstLaunchHint ? .semibold : .medium)
@@ -3352,6 +3352,11 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                         color: #93a7c4 !important;
                     }
                     a, a * { color: #7cc4ff !important; }
+                    a, a * {
+                        text-decoration-style: solid !important;
+                        text-decoration-thickness: 1px !important;
+                        text-underline-offset: 2px !important;
+                    }
                     a:not([role="button"]), a:not([role="button"]) * {
                         background-color: transparent !important;
                         background-image: none !important;
@@ -3367,17 +3372,26 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                 var all = document.body.getElementsByTagName('*');
                 for (var k = 0; k < all.length; k++) { nodes.push(all[k]); }
                 var vw = window.innerWidth || 420;
+                var vh = window.innerHeight || 640;
                 for (var i = 0; i < nodes.length; i++) {
                     var el = nodes[i];
                     if (skipTags[el.tagName]) continue;
                     var cs = window.getComputedStyle(el);
                     var bgi = cs.backgroundImage;
                     if (bgi && bgi.indexOf('gradient(') !== -1 && bgi.indexOf('url(') === -1 && /(255|248|249|250|241|243|244|238|232|229)/.test(bgi)) {
-                        var hasMaskBg = (el.textContent || '').trim().length < 36 || el.querySelector('img') === null;
+                        var hasMaskBg = (el.textContent || '').trim().length < 36 && el.querySelector('img, textarea, input') === null;
                         if (hasMaskBg) {
                             el.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(9, 14, 26, 0), rgba(9, 14, 26, 0.96))', 'important');
                             el.setAttribute('data-cts-dark-bgi', '1');
                         }
+                    }
+                    var isMediaWrap = el.querySelector('img, picture, video') !== null
+                        && (el.innerText || '').trim().length < 28
+                        && el.querySelector('textarea, input, [role="tab"]') === null;
+                    if (isMediaWrap && el.tagName !== 'BODY' && el.tagName !== 'MAIN') {
+                        el.style.setProperty('background-color', 'transparent', 'important');
+                        el.setAttribute('data-cts-dark-bg', '1');
+                        continue;
                     }
                     var bg = cs.backgroundColor;
                     if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
@@ -3416,6 +3430,42 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                                 el.setAttribute('data-cts-dark-fg', '1');
                             }
                         }
+                    }
+                }
+                // Keep bottom AI Mode composer dock clean and opaque so scrolled text never bleeds behind it
+                var composers = document.querySelectorAll('textarea, input[type="text"], input:not([type])');
+                for (var c = 0; c < composers.length; c++) {
+                    var inp = composers[c];
+                    var ir = inp.getBoundingClientRect();
+                    if (ir.width < 120 || ir.bottom < vh * 0.52) continue;
+                    var pill = inp.closest('form') || inp.parentElement;
+                    var p = inp.parentElement;
+                    for (var up = 0; up < 4 && p && p !== document.body; up++) {
+                        var pr = p.getBoundingClientRect();
+                        if (pr.width >= 200 && pr.height >= 42 && pr.height <= 170) {
+                            pill = p;
+                        }
+                        p = p.parentElement;
+                    }
+                    if (pill) {
+                        pill.style.setProperty('background-color', 'rgba(22, 32, 54, 0.96)', 'important');
+                        pill.style.setProperty('border', '1px solid rgba(130, 175, 255, 0.24)', 'important');
+                        pill.style.setProperty('border-radius', '20px', 'important');
+                        pill.style.setProperty('box-shadow', '0 4px 18px rgba(0, 0, 0, 0.35)', 'important');
+                        pill.style.setProperty('overflow', 'hidden', 'important');
+                        pill.setAttribute('data-cts-keep', '1');
+                    }
+                    var dock = pill ? pill.parentElement : null;
+                    while (dock && dock !== document.body) {
+                        var dcs = window.getComputedStyle(dock);
+                        if (dcs.position === 'fixed' || dcs.position === 'sticky') {
+                            dock.style.setProperty('background-color', '#090e1a', 'important');
+                            dock.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(9, 14, 26, 0.92), #090e1a 16px)', 'important');
+                            dock.style.setProperty('padding-top', '6px', 'important');
+                            dock.setAttribute('data-cts-keep', '1');
+                            break;
+                        }
+                        dock = dock.parentElement;
                     }
                 }
             }
@@ -3513,7 +3563,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             st = document.createElement('style');
             st.id = 'cts-clean-style';
             st.textContent = `
-                header, #searchform, form[action="/search"], [role="search"],
+                header, #searchform,
                 #sfcnt, #tophf,
                 div[data-hveid] input[aria-label*="Add to your search"],
                 div[jscontroller] > div > a[aria-label="Google"],
@@ -3524,7 +3574,8 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                 html, body {
                     width: 100% !important;
                     max-width: 100% !important;
-                    padding-top: 2px !important;
+                    padding-top: 10px !important;
+                    padding-bottom: 14px !important;
                     margin-top: 0 !important;
                     overflow-x: hidden !important;
                     box-sizing: border-box !important;
@@ -3588,23 +3639,33 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         }
         function runCleanupPass() {
             if (location.pathname.indexOf('/sorry') === 0 || !document.body) return;
-            // 1. Hide any parent toolbar containing duplicate 'Add to your search' text
-            var walker = document.querySelectorAll('input, span, div');
+            // 1. Hide any top search chrome without breaking bottom AI Mode composer forms
+            var walker = document.querySelectorAll('input, span, div, form[action="/search"], [role="search"]');
             for (var i = 0; i < walker.length; i++) {
                 var el = walker[i];
+                if (el.getAttribute('data-cts-keep') === '1' || el.querySelector('textarea')) continue;
+                if (el.tagName === 'FORM' || el.getAttribute('role') === 'search') {
+                    var fr = el.getBoundingClientRect();
+                    if (fr.top < 170 && fr.height < 130) {
+                        el.style.setProperty('display', 'none', 'important');
+                    }
+                    continue;
+                }
                 var txt = (el.getAttribute('placeholder') || el.getAttribute('aria-label') || '').toLowerCase();
                 if (txt.indexOf('add to your search') !== -1) {
                     var box = el.closest('form') || el.closest('[role="search"]') || el.parentElement;
-                    if (box && box.offsetHeight < 120) {
+                    if (box && box.offsetHeight < 120 && !box.querySelector('textarea')) {
                         box.style.setProperty('display', 'none', 'important');
                     }
                 }
             }
-            // 2. Collapse empty orphaned top header chrome and dead spacer blocks
+            // 2. Collapse empty orphaned top header chrome without clipping real headings
             var allDivs = document.querySelectorAll('div, section, nav');
             for (var j = 0; j < allDivs.length; j++) {
                 var d = allDivs[j];
                 if (d.getAttribute('data-cts-keep') === '1') continue;
+                var style = window.getComputedStyle(d);
+                if (style.position === 'fixed' || style.position === 'sticky' || style.overflowY === 'auto' || style.overflowY === 'scroll') continue;
                 var rect = d.getBoundingClientRect();
                 var textTrim = (d.innerText || '').trim();
                 if (rect.top >= -12 && rect.top < 140 && rect.height >= 10 && rect.height <= 180) {
@@ -3619,7 +3680,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                     }
                 }
                 if (d.children.length === 0 && (d.textContent || '').trim() === '' && d.offsetHeight >= 14 && d.offsetHeight <= 150) {
-                    var bg = window.getComputedStyle(d).backgroundImage;
+                    var bg = style.backgroundImage;
                     if (!bg || bg === 'none') {
                         d.style.setProperty('display', 'none', 'important');
                         d.style.setProperty('height', '0px', 'important');
@@ -3628,13 +3689,13 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                         continue;
                     }
                 }
-                var style = window.getComputedStyle(d);
-                if (rect.top >= -4 && rect.top < 120) {
-                    if (parseInt(style.paddingTop, 10) > 18) {
-                        d.style.setProperty('padding-top', '4px', 'important');
+                var hasHeading = d.querySelector('h1, h2, h3, [role="heading"]') !== null;
+                if (!hasHeading && rect.top >= -4 && rect.top < 120) {
+                    if (parseInt(style.paddingTop, 10) > 28) {
+                        d.style.setProperty('padding-top', '10px', 'important');
                     }
-                    if (parseInt(style.marginTop, 10) > 16) {
-                        d.style.setProperty('margin-top', '0px', 'important');
+                    if (parseInt(style.marginTop, 10) > 24) {
+                        d.style.setProperty('margin-top', '4px', 'important');
                     }
                 }
                 if (parseInt(style.marginBottom, 10) > 16) {
@@ -3647,11 +3708,11 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             var mainWrap = document.querySelector('main, [role="main"], #main, #cnt, #rcnt');
             if (mainWrap) {
                 var mcs = window.getComputedStyle(mainWrap);
-                if (parseInt(mcs.paddingTop, 10) > 14) {
-                    mainWrap.style.setProperty('padding-top', '4px', 'important');
+                if (parseInt(mcs.paddingTop, 10) > 20) {
+                    mainWrap.style.setProperty('padding-top', '10px', 'important');
                 }
-                if (parseInt(mcs.marginTop, 10) > 12) {
-                    mainWrap.style.setProperty('margin-top', '0px', 'important');
+                if (parseInt(mcs.marginTop, 10) > 18) {
+                    mainWrap.style.setProperty('margin-top', '2px', 'important');
                 }
             }
         }
@@ -4263,7 +4324,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         aiIcon.setContentHuggingPriority(.required, for: .horizontal)
         aiIcon.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        aiAnswerLabel = NSTextField(labelWithString: "Synthesizing AI insight…")
+        aiAnswerLabel = NSTextField(labelWithString: "Generating answer…")
         aiAnswerLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
         aiAnswerLabel.textColor = .labelColor
         aiAnswerLabel.usesSingleLineMode = false
@@ -4856,7 +4917,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         let hasKey = !KeychainHelper.loadAPIKey().isEmpty
         if hasKey || forceShow {
             AppleMotion.animateVisibility(aiAnswerCard, visible: true, scale: 0.96, duration: 0.22)
-            aiAnswerLabel.stringValue = "Synthesizing AI insight…"
+            aiAnswerLabel.stringValue = "Generating answer…"
         } else {
             aiAnswerCard.isHidden = true
         }
@@ -5086,7 +5147,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             item.target = self
             item.representedObject = engine.rawValue
             item.state = (AppSettings.shared.searchEngine == engine) ? .on : .off
-            item.image = NSImage(systemSymbolName: engine.symbolName, accessibilityDescription: nil)
+            item.image = loopSymbolImage(engine.symbolName, accessibility: nil, pointSize: 12)
             engineSubmenu.addItem(item)
         }
         let engineParent = NSMenuItem(title: "Switch Search Engine", action: nil, keyEquivalent: "")

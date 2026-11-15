@@ -15,16 +15,16 @@
       gap: 8px;
     }
     .about-logo {
-      width: 66px;
-      height: 66px;
+      width: 64px;
+      height: 64px;
       border-radius: 18px;
-      background: linear-gradient(145deg, #172554, #090d1a);
-      border: 1px solid rgba(56, 189, 248, 0.48);
-      box-shadow: 0 12px 32px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      background: transparent;
+      box-shadow: 0 12px 30px rgba(37, 99, 235, 0.36);
       display: flex;
       align-items: center;
       justify-content: center;
       margin-bottom: 4px;
+      animation: badgeFloat 4.8s ease-in-out infinite;
     }
   </style>
 </head>
@@ -44,6 +44,10 @@
           <div class="about-logo" id="about-logo"></div>
           <h1 class="title-main" style="font-size:19px;">LoopSearch</h1>
           <span class="pill-badge" id="ver-pill">v1.0.3 • Windows</span>
+          <div class="update-banner" id="about-update-banner" style="width:100%;max-width:308px;margin-top:2px;text-align:left;">
+            <span id="about-update-text" style="font-size:11.5px;font-weight:650;color:#bae6fd;">New release available</span>
+            <button class="btn-primary" id="about-install-btn" style="padding:4px 10px;font-size:11px;flex-shrink:0;">Download</button>
+          </div>
           <p class="step-desc" style="max-width:290px;margin-top:4px;">
             Circle, box, or tap anything on your screen to search with Google Lens, copy offline OCR text, or ask AI.
           </p>
@@ -64,11 +68,26 @@
   <script>
     (function () {
       const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars, staggerReveal } = window.LoopUI;
-      document.getElementById('about-logo').innerHTML = Icons.brandMark(40);
+      document.getElementById('about-logo').innerHTML = Icons.brandMark(62);
       document.getElementById('close-btn').innerHTML = Icons.close(13);
       initHorizonLightWell(document.getElementById('glass-shell'));
       initDialogStars(document.getElementById('stars-canvas'), 20);
       staggerReveal('.about-center > *', 30, 44);
+
+      function applyAboutUpdate(up) {
+        const banner = document.getElementById('about-update-banner');
+        const btn = document.getElementById('update-btn');
+        if (up && up.updateAvailable) {
+          document.getElementById('about-update-text').textContent = `Update available: v${up.latestVersion}`;
+          document.getElementById('about-install-btn').onclick = () =>
+            window.loopSearch.openExternal(up.releaseUrl);
+          banner.classList.add('visible');
+          btn.textContent = `Install v${up.latestVersion}`;
+        } else {
+          banner.classList.remove('visible');
+          btn.textContent = 'Check Updates';
+        }
+      }
 
       let settings = null;
       window.loopSearch.getSettings().then((s) => {
@@ -76,6 +95,8 @@
         applyGlassAppearance(s);
         document.getElementById('ver-pill').textContent = `v${s.appVersion} • ${s.osVersion}`;
       });
+      window.loopSearch.getUpdateState().then(applyAboutUpdate);
+      window.loopSearch.onUpdateAvailable(applyAboutUpdate);
       window.loopSearch.onSettingsChanged(applyGlassAppearance);
 
       document.getElementById('close-btn').onclick = () => window.loopSearch.closeWindow();
@@ -85,8 +106,10 @@
         settings && window.loopSearch.openExternal(settings.xProfileUrl);
       document.getElementById('update-btn').onclick = async () => {
         const res = await window.loopSearch.checkForUpdates();
-        if (res.ok && res.updateAvailable) window.loopSearch.openExternal(res.releaseUrl);
-        else if (res.ok) window.loopSearch.showToast(`You're on latest v${res.currentVersion}`, 'success');
+        if (res.ok && res.updateAvailable) {
+          applyAboutUpdate(res);
+          window.loopSearch.openExternal(res.releaseUrl);
+        } else if (res.ok) window.loopSearch.showToast(`You're on latest v${res.currentVersion}`, 'success');
         else window.loopSearch.showToast(res.error || 'Update check failed', 'error');
       };
       window.addEventListener('keydown', (e) => {

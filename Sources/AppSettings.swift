@@ -79,7 +79,7 @@ enum SearchEngine: String, CaseIterable {
 
     var symbolName: String {
         switch self {
-        case .googleLens: return "viewfinder.circle"
+        case .googleLens: return "loopsearch.logo"
         case .google: return "magnifyingglass"
         case .perplexity: return "sparkles.rectangle.stack"
         case .bing: return "globe"
@@ -238,6 +238,7 @@ extension Notification.Name {
     static let circleToSearchHistoryChanged = Notification.Name("CircleToSearchHistoryChanged")
     static let circleToSearchReopenHistory = Notification.Name("CircleToSearchReopenHistory")
     static let loopSearchGuideClosed = Notification.Name("LoopSearchGuideClosed")
+    static let loopSearchUpdateChanged = Notification.Name("LoopSearchUpdateChanged")
 }
 
 // MARK: - Private Encrypted Local Vault (User-only 0o700/0o600, avoids login Keychain prompts)
@@ -1104,10 +1105,19 @@ final class PinnedCaptureWindowController: NSObject {
 final class AppUpdateChecker {
     static let shared = AppUpdateChecker()
 
+    struct AvailableUpdate: Equatable {
+        let version: String
+        let releaseTitle: String
+        let notes: String
+        let dmgURL: URL?
+        let releasePageURL: URL
+    }
+
     static let githubReleasesPageURL = URL(string: "https://github.com/aveeshasenevirathne2-hub/LoopSearch/releases")!
     private static let latestReleaseAPIURL = URL(string: "https://api.github.com/repos/aveeshasenevirathne2-hub/LoopSearch/releases/latest")!
     private static let skippedVersionKey = "skipped_update_version"
 
+    private(set) var availableUpdate: AvailableUpdate?
     private var isChecking = false
     private var isInstalling = false
     private var progressPanel: UpdateProgressWindow?
@@ -1126,6 +1136,20 @@ final class AppUpdateChecker {
         let html_url: String
         let body: String?
         let assets: [Asset]?
+    }
+
+    func installOrOpenAvailableUpdate() {
+        guard let update = availableUpdate else {
+            checkForUpdates(interactive: true)
+            return
+        }
+        if let dmgURL = update.dmgURL {
+            Task { @MainActor [weak self] in
+                await self?.downloadAndInstallUpdate(from: dmgURL, version: update.version, fallbackURL: update.releasePageURL)
+            }
+        } else {
+            NSWorkspace.shared.open(update.releasePageURL)
+        }
     }
 
     func checkForUpdates(interactive: Bool = true) {
@@ -1149,6 +1173,10 @@ final class AppUpdateChecker {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
 
             if status == 404 {
+                if availableUpdate != nil {
+                    availableUpdate = nil
+                    NotificationCenter.default.post(name: .loopSearchUpdateChanged, object: nil)
+                }
                 if interactive {
                     presentUpToDateAlert(message: "You're running LoopSearch v\(Self.currentVersion). No newer GitHub release is published yet.")
                 }
@@ -1167,26 +1195,42 @@ final class AppUpdateChecker {
             let localVersion = Self.normalizeVersion(Self.currentVersion)
 
             if Self.isVersion(remoteVersion, newerThan: localVersion) {
-                let skipped = UserDefaults.standard.string(forKey: Self.skippedVersionKey)
-                if !interactive, skipped == remoteVersion {
-                    return
-                }
-
                 let dmgURL = release.assets?
                     .first(where: { $0.name.lowercased().hasSuffix(".dmg") })
                     .flatMap { URL(string: $0.browser_download_url) }
                     .flatMap { $0.scheme?.lowercased() == "https" ? $0 : nil }
                 let releaseURL = URL(string: release.html_url) ?? Self.githubReleasesPageURL
 
-                presentUpdateAvailableAlert(
+                let update = AvailableUpdate(
                     version: remoteVersion,
                     releaseTitle: release.name ?? "LoopSearch v\(remoteVersion)",
                     notes: release.body ?? "",
                     dmgURL: dmgURL,
                     releasePageURL: releaseURL
                 )
-            } else if interactive {
-                presentUpToDateAlert(message: "You're running the latest version of LoopSearch (v\(Self.currentVersion)).")
+                availableUpdate = update
+                NotificationCenter.default.post(name: .loopSearchUpdateChanged, object: update)
+
+                let skipped = UserDefaults.standard.string(forKey: Self.skippedVersionKey)
+                if !interactive, skipped == remoteVersion {
+                    return
+                }
+
+                presentUpdateAvailableAlert(
+                    version: remoteVersion,
+                    releaseTitle: update.releaseTitle,
+                    notes: update.notes,
+                    dmgURL: dmgURL,
+                    releasePageURL: releaseURL
+                )
+            } else {
+                if availableUpdate != nil {
+                    availableUpdate = nil
+                    NotificationCenter.default.post(name: .loopSearchUpdateChanged, object: nil)
+                }
+                if interactive {
+                    presentUpToDateAlert(message: "You're running the latest version of LoopSearch (v\(Self.currentVersion)).")
+                }
             }
         } catch {
             if interactive {

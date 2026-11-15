@@ -66,6 +66,7 @@ const pinnedWindows = new Set();
 let isCapturing = false;
 let isQuitting = false;
 let registeredAccelerator = null;
+let latestUpdateState = null;
 
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.loopsearch.windows');
@@ -546,7 +547,19 @@ function rebuildTrayMenu() {
         ]
       : [{ label: 'No Recent Captures', enabled: false }];
 
-  const template = [
+  const template = [];
+
+  if (latestUpdateState && latestUpdateState.updateAvailable) {
+    template.push(
+      {
+        label: `Update Available: v${latestUpdateState.latestVersion} — Download…`,
+        click: () => shell.openExternal(latestUpdateState.releaseUrl)
+      },
+      { type: 'separator' }
+    );
+  }
+
+  template.push(
     {
       label: `Circle to Search (${settings.hotkeyDisplay})`,
       click: () => startOverlay()
@@ -563,7 +576,7 @@ function rebuildTrayMenu() {
       label: 'Capture History',
       submenu: historySubmenu
     }
-  ];
+  );
 
   if (pinnedWindows.size > 0) {
     template.push({
@@ -591,8 +604,14 @@ function rebuildTrayMenu() {
       click: () => openManagedWindow('onboarding')
     },
     {
-      label: 'Check for Updates...',
-      click: () => handleMenuUpdateCheck()
+      label:
+        latestUpdateState && latestUpdateState.updateAvailable
+          ? `Install Update (v${latestUpdateState.latestVersion})…`
+          : 'Check for Updates...',
+      click: () =>
+        latestUpdateState && latestUpdateState.updateAvailable
+          ? shell.openExternal(latestUpdateState.releaseUrl)
+          : handleMenuUpdateCheck()
     },
     {
       label: 'Rate & Suggest Feature...',
@@ -642,9 +661,32 @@ async function searchClipboardImage() {
   });
 }
 
-async function handleMenuUpdateCheck() {
+async function refreshUpdateState({ silent = false } = {}) {
   try {
     const res = await checkForUpdates(APP_VERSION);
+    const prevAvailable = Boolean(latestUpdateState && latestUpdateState.updateAvailable);
+    const prevVer = latestUpdateState && latestUpdateState.latestVersion;
+    latestUpdateState = { ok: true, ...res };
+    if (res.updateAvailable) {
+      rebuildTrayMenu();
+      broadcastAll('app:update-available', latestUpdateState);
+      if (!prevAvailable || prevVer !== res.latestVersion) {
+        showToast(`Update available: LoopSearch v${res.latestVersion}`, 'info', 4200);
+      }
+    } else if (prevAvailable) {
+      rebuildTrayMenu();
+      broadcastAll('app:update-available', latestUpdateState);
+    }
+    return latestUpdateState;
+  } catch (err) {
+    if (!silent) throw err;
+    return null;
+  }
+}
+
+async function handleMenuUpdateCheck() {
+  try {
+    const res = await refreshUpdateState({ silent: false });
     if (res.updateAvailable) {
       const choice = await dialog.showMessageBox({
         type: 'info',
@@ -824,11 +866,12 @@ function wireIpcHandlers() {
 
   ipcMain.handle('app:check-updates', async () => {
     try {
-      return { ok: true, ...(await checkForUpdates(APP_VERSION)) };
+      return await refreshUpdateState({ silent: false });
     } catch (err) {
       return { ok: false, error: err.message };
     }
   });
+  ipcMain.handle('app:get-update-state', () => latestUpdateState);
 
   ipcMain.handle('app:open-feedback', (_e, payload) => {
     const url = buildFeedbackIssueUrl({
@@ -1001,6 +1044,10 @@ app.whenReady().then(async () => {
 
   // Silent session resume telemetry (strictly sends 'session_resume' per firestore.rules)
   authService.restoreAndRecordResume().catch(() => {});
+
+  setTimeout(() => {
+    refreshUpdateState({ silent: true }).catch(() => {});
+  }, 3500);
 
   const isBackgroundLaunch = cliArgs.includes('--background');
   if (!isBackgroundLaunch && (!initialSettings.onboardingCompleted || !authService.isSignedIn())) {

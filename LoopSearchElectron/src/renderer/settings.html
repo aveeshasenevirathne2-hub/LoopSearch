@@ -69,6 +69,16 @@
         <div class="scroll-body">
           <!-- TAB: GENERAL -->
           <div id="tab-general" class="tab-panel" style="display:flex;flex-direction:column;gap:10px;">
+            <div class="update-banner" id="studio-update-banner">
+              <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                <span id="studio-update-brand"></span>
+                <div style="min-width:0;">
+                  <div id="studio-update-title" style="font-size:12.5px;font-weight:700;color:#f8fafc;">Update Available</div>
+                  <div id="studio-update-sub" style="font-size:11px;color:#93c5fd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">A new release of LoopSearch is ready on GitHub.</div>
+                </div>
+              </div>
+              <button class="btn-primary" id="studio-install-update-btn" style="padding:6px 12px;font-size:11.5px;flex-shrink:0;">Download Update</button>
+            </div>
             <div class="glass-card">
               <div class="field-label">Global Trigger Shortcut</div>
               <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
@@ -158,7 +168,7 @@
                 <span class="pill-badge" id="gemini-status-pill">Not Configured</span>
               </div>
               <p class="step-desc" style="margin-top:6px;">
-                Encrypted locally with AES-256-GCM. Enables instant in-overlay ✨ Explain &amp; smart Q&amp;A answers.
+                Encrypted locally with AES-256-GCM. Enables in-overlay Explain answers and follow-up Q&amp;A.
               </p>
               <div class="key-row">
                 <input type="password" class="text-input" id="gemini-key-input" placeholder="Paste Gemini API key (AIza...)" />
@@ -201,7 +211,8 @@
   <script>
     (function () {
       const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars, renderOpticalOrbHtml, staggerReveal, initSegmentedThumb } = window.LoopUI;
-      document.getElementById('brand-icon').innerHTML = Icons.brandMark(24);
+      document.getElementById('brand-icon').innerHTML = Icons.brandMark(34);
+      document.getElementById('studio-update-brand').innerHTML = Icons.brandMark(26);
       document.getElementById('close-btn').innerHTML = Icons.close(13);
       document.getElementById('preview-orb-slot').innerHTML = renderOpticalOrbHtml(true);
       initHorizonLightWell(document.getElementById('glass-shell'));
@@ -432,14 +443,30 @@
         await window.loopSearch.clearHistory();
         window.loopSearch.showToast('Capture history cleared', 'info');
       };
+      function applyUpdateBanner(up) {
+        const banner = document.getElementById('studio-update-banner');
+        const statusText = document.getElementById('update-status-text');
+        if (up && up.updateAvailable) {
+          document.getElementById('studio-update-title').textContent = `Update Available — LoopSearch v${up.latestVersion}`;
+          document.getElementById('studio-update-sub').textContent = `Current v${up.currentVersion} • Ready on GitHub Releases`;
+          document.getElementById('studio-install-update-btn').onclick = () =>
+            window.loopSearch.openExternal(up.releaseUrl);
+          banner.classList.add('visible');
+          if (statusText) statusText.textContent = `Update available: v${up.latestVersion}`;
+        } else {
+          banner.classList.remove('visible');
+        }
+      }
+
       document.getElementById('check-updates-btn').onclick = async () => {
         const res = await window.loopSearch.checkForUpdates();
         if (!res.ok) {
           window.loopSearch.showToast(`Update check failed: ${res.error}`, 'error');
         } else if (res.updateAvailable) {
-          document.getElementById('update-status-text').textContent = `Update available: v${res.latestVersion}!`;
+          applyUpdateBanner(res);
           window.loopSearch.openExternal(res.releaseUrl);
         } else {
+          applyUpdateBanner(res);
           window.loopSearch.showToast(`LoopSearch v${res.currentVersion} is up to date`, 'success');
         }
       };
@@ -449,14 +476,17 @@
 
       window.loopSearch.onSettingsChanged((s) => renderAll(s, null));
       window.loopSearch.onAuthChanged((a) => renderAll(null, a));
+      window.loopSearch.onUpdateAvailable(applyUpdateBanner);
 
       Promise.all([
         window.loopSearch.getSettings(),
         window.loopSearch.getAuthState(),
-        window.loopSearch.getHotkeyPresets()
-      ]).then(([s, a, p]) => {
+        window.loopSearch.getHotkeyPresets(),
+        window.loopSearch.getUpdateState()
+      ]).then(([s, a, p, up]) => {
         presets = p;
         renderAll(s, a);
+        applyUpdateBanner(up);
       });
     })();
   </script>

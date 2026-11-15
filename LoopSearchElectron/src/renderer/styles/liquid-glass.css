@@ -262,12 +262,9 @@ a {
 .brand-badge {
   width: 40px;
   height: 40px;
-  border-radius: 13px;
-  background: linear-gradient(145deg, rgba(23, 39, 86, 0.95), rgba(10, 16, 36, 0.98));
-  border: 1px solid rgba(125, 211, 252, 0.42);
-  box-shadow:
-    0 8px 20px rgba(37, 99, 235, 0.32),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  border-radius: 12px;
+  background: transparent;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.34);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -383,20 +380,94 @@ a {
   opacity: 1;
 }
 
-/* Staggered macOS Reveal Utility */
+/* Kinetic Horizon Tilt-Rise Stagger Reveal (matches macOS AppleMotion) */
 @keyframes cardStaggerIn {
   0% {
     opacity: 0;
-    transform: translateY(12px) scale(0.96);
+    transform: translateY(14px) scale(0.955) rotate(var(--stagger-tilt, 0deg));
   }
   70% {
     opacity: 1;
-    transform: translateY(-1.5px) scale(1.005);
+    transform: translateY(-1.5px) scale(1.006) rotate(0deg);
   }
   100% {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0) scale(1) rotate(0deg);
   }
+}
+
+@keyframes springPopAnim {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.08); }
+  72% { transform: scale(0.98); }
+  100% { transform: scale(1); }
+}
+
+.spring-pop {
+  animation: springPopAnim calc(0.28s * var(--motion-scale)) var(--spring-snappy) both;
+}
+
+.orb-dial-arc {
+  position: absolute;
+  inset: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  pointer-events: none;
+  animation: dialSpin calc(10s * var(--motion-scale)) linear infinite;
+}
+
+@keyframes dialSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.chip-btn,
+.btn-glass,
+.btn-primary,
+.smart-chip {
+  position: relative;
+  overflow: hidden;
+}
+
+.chip-btn::after,
+.btn-glass::after,
+.btn-primary::after,
+.smart-chip::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(108deg, transparent 22%, rgba(255, 255, 255, 0.24) 50%, transparent 78%);
+  transform: translateX(-115%);
+  transition: transform calc(0.46s * var(--motion-scale)) var(--ease-silk), opacity 0.2s ease;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chip-btn:hover::after,
+.btn-glass:hover::after,
+.btn-primary:hover::after,
+.smart-chip:hover::after {
+  transform: translateX(115%);
+  opacity: 1;
+}
+
+.update-banner {
+  border-radius: 15px;
+  padding: 11px 13px;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  background:
+    radial-gradient(ellipse at 50% 115%, rgba(56, 189, 248, 0.26), transparent 72%),
+    rgba(12, 24, 54, 0.78);
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  box-shadow: 0 8px 24px rgba(14, 165, 233, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+.update-banner.visible {
+  display: flex;
+  animation: cardStaggerIn calc(0.32s * var(--motion-scale)) var(--spring-snappy) both;
 }
 
 .stagger-animate {

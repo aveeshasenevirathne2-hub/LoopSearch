@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     nonisolated(unsafe) private var reopenHistoryObserver: NSObjectProtocol?
     nonisolated(unsafe) private var authObserver: NSObjectProtocol?
     nonisolated(unsafe) private var guideClosedObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var updateObserver: NSObjectProtocol?
+    private var lastToastedUpdateVersion: String?
 
     private var selectionMode: SelectionMode {
         get { AppSettings.shared.selectionMode }
@@ -67,6 +69,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func checkForUpdates() {
         AppUpdateChecker.shared.checkForUpdates(interactive: true)
+    }
+
+    @objc private func installAvailableUpdate() {
+        AppUpdateChecker.shared.installOrOpenAvailableUpdate()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -180,6 +186,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 )
             }
         }
+
+        updateObserver = NotificationCenter.default.addObserver(
+            forName: .loopSearchUpdateChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.rebuildMenu()
+                if let update = AppUpdateChecker.shared.availableUpdate,
+                   self.lastToastedUpdateVersion != update.version {
+                    self.lastToastedUpdateVersion = update.version
+                    self.toastController.show(
+                        message: "Update available: LoopSearch v\(update.version) — click Updates in Studio or Menu Bar",
+                        duration: 4.2
+                    )
+                }
+            }
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -207,6 +232,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let guideClosedObserver {
             NotificationCenter.default.removeObserver(guideClosedObserver)
         }
+        if let updateObserver {
+            NotificationCenter.default.removeObserver(updateObserver)
+        }
     }
 
     private func setupStatusItem() {
@@ -227,6 +255,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func rebuildMenu() {
         let menu = NSMenu()
         menu.delegate = self
+
+        if let update = AppUpdateChecker.shared.availableUpdate {
+            let updateNowItem = NSMenuItem(
+                title: "Update Available: v\(update.version) — Install…",
+                action: #selector(installAvailableUpdate),
+                keyEquivalent: ""
+            )
+            updateNowItem.target = self
+            updateNowItem.image = loopSymbolImage("loopsearch.logo", accessibility: "Update Available", pointSize: 12)
+            menu.addItem(updateNowItem)
+            menu.addItem(.separator())
+        }
 
         let triggerTitle = FirebaseAuthService.shared.isSignedIn
             ? "Start LoopSearch (\(AppSettings.shared.activeHotkeyDisplayString))"
@@ -425,7 +465,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rateItem.target = self
         menu.addItem(rateItem)
 
-        let updatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        let updatesTitle = AppUpdateChecker.shared.availableUpdate.map { "Install Update (v\($0.version))…" } ?? "Check for Updates…"
+        let updatesAction: Selector = AppUpdateChecker.shared.availableUpdate != nil ? #selector(installAvailableUpdate) : #selector(checkForUpdates)
+        let updatesItem = NSMenuItem(title: updatesTitle, action: updatesAction, keyEquivalent: "")
         updatesItem.target = self
         menu.addItem(updatesItem)
 

@@ -18,6 +18,7 @@
       position: fixed;
       inset: 0;
       overflow: hidden;
+      transition: opacity 0.24s cubic-bezier(0.32, 0, 0.67, 1);
     }
 
     #screen-canvas, #fx-canvas {
@@ -26,6 +27,29 @@
       width: 100%;
       height: 100%;
       display: block;
+      transition: transform 0.24s cubic-bezier(0.32, 0, 0.67, 1), opacity 0.22s ease;
+    }
+
+    #overlay-root.closing #screen-canvas {
+      transform: scale(1.008) !important;
+      opacity: 0;
+    }
+
+    #overlay-root.closing #fx-canvas,
+    #overlay-root.closing #ocr-layer {
+      opacity: 0;
+    }
+
+    #overlay-root.closing #prompt-capsule {
+      opacity: 0;
+      transform: translate(-50%, 24px) scale(0.92);
+      transition: transform 0.24s cubic-bezier(0.32, 0, 0.67, 1), opacity 0.20s ease;
+    }
+
+    #overlay-root.closing #results-sheet {
+      opacity: 0;
+      transform: translate(0px, 18px) scale(0.94);
+      transition: transform 0.24s cubic-bezier(0.32, 0, 0.67, 1), opacity 0.20s ease;
     }
 
     #fx-canvas {
@@ -754,7 +778,7 @@
 
       <div id="ai-answer-card">
         <div class="ai-answer-header">
-          <span>✨ LoopSearch AI Insight</span>
+          <span style="display:inline-flex;align-items:center;gap:6px;"><span id="ai-card-brand" style="display:inline-flex;"></span><span>LoopSearch Answer</span></span>
           <div style="display:flex;gap:6px;">
             <button class="chip-btn" id="copy-ai-btn" style="padding:2px 8px;font-size:10.5px;">Copy</button>
             <button class="chip-btn" id="close-ai-btn" style="padding:2px 8px;font-size:10.5px;">Hide</button>

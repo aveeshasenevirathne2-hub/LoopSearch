@@ -70,6 +70,8 @@ contextBridge.exposeInMainWorld('loopSearch', {
   // External & Updates & Feedback
   openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
   checkForUpdates: () => ipcRenderer.invoke('app:check-updates'),
+  getUpdateState: () => ipcRenderer.invoke('app:get-update-state'),
+  onUpdateAvailable: (cb) => subscribe('app:update-available', cb),
   openFeedbackIssue: (payload) => ipcRenderer.invoke('app:open-feedback', payload),
   getAppInfo: () => ipcRenderer.invoke('app:info')
 });

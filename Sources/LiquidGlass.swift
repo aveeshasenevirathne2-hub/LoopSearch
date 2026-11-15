@@ -187,6 +187,28 @@ enum AppleMotion {
         layer.add(fade, forKey: "\(key)_fade")
     }
 
+    static func springPop(
+        _ view: NSView,
+        scale: CGFloat = 1.06,
+        dampingRatio: CGFloat = 0.68,
+        response: CFTimeInterval = 0.30
+    ) {
+        guard !AppSettings.shared.effectiveReduceMotion else { return }
+        view.wantsLayer = true
+        guard let layer = view.layer else { return }
+        let b = view.bounds.width > 1 ? view.bounds : CGRect(x: 0, y: 0, width: 120, height: 32)
+        let peak = centeredTransform(bounds: b, scale: scale)
+        let anim = spring(
+            keyPath: "transform",
+            from: peak,
+            to: CATransform3DIdentity,
+            dampingRatio: dampingRatio,
+            response: response
+        )
+        layer.transform = CATransform3DIdentity
+        layer.add(anim, forKey: "appleMotionSpringPop")
+    }
+
     static func staggeredCardsReveal(
         _ views: [NSView],
         baseDelay: TimeInterval = 0.03,
@@ -203,14 +225,15 @@ enum AppleMotion {
             }
             let delay = baseDelay + Double(idx) * stepDelay
             let b = v.bounds.width > 1 ? v.bounds : CGRect(x: 0, y: 0, width: 420, height: 68)
-            let startXform = centeredTransform(bounds: b, scale: 0.96, translation: CGPoint(x: 0, y: -10))
+            let tilt: CGFloat = (idx % 2 == 0) ? -0.014 : 0.014
+            let startXform = centeredTransform(bounds: b, scale: 0.955, rotationZ: tilt, translation: CGPoint(x: 0, y: -12))
             let now = CACurrentMediaTime()
             let springAnim = spring(
                 keyPath: "transform",
                 from: startXform,
                 to: CATransform3DIdentity,
-                dampingRatio: 0.84,
-                response: 0.40
+                dampingRatio: 0.80,
+                response: 0.44
             )
             springAnim.beginTime = now + delay
             springAnim.fillMode = .backwards
@@ -1551,7 +1574,7 @@ final class LiquidGlassButton: NSView {
     }
 
     func updateSymbol(_ symbolName: String, pointSize: CGFloat = 11.5, weight: NSFont.Weight = .semibold) {
-        if let baseImg = NSImage(systemSymbolName: symbolName, accessibilityDescription: toolTip ?? title) {
+        if let baseImg = loopSymbolImage(symbolName, accessibility: toolTip ?? title, pointSize: pointSize) {
             let cfg = NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
             iconView.image = baseImg.withSymbolConfiguration(cfg) ?? baseImg
         }
@@ -1656,7 +1679,7 @@ final class LiquidGlassButton: NSView {
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         if let symbol,
-           let baseImg = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip ?? title) {
+           let baseImg = loopSymbolImage(symbol, accessibility: tooltip ?? title, pointSize: symbolPointSize) {
             let cfg = NSImage.SymbolConfiguration(pointSize: symbolPointSize, weight: symbolWeight)
             iconView.image = baseImg.withSymbolConfiguration(cfg) ?? baseImg
             iconView.imageScaling = .scaleNone
@@ -2129,7 +2152,8 @@ final class LiquidGlassSegmentedControl: NSView {
             inner.translatesAutoresizingMaskIntoConstraints = false
 
             var iconView: NSImageView?
-            if let sym = opt.symbol, let img = NSImage(systemSymbolName: sym, accessibilityDescription: opt.title) {
+            if let sym = opt.symbol,
+               let img = loopSymbolImage(sym, accessibility: opt.title, pointSize: compact ? 10 : 11) {
                 let iv = NSImageView(image: img)
                 iv.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: compact ? 10 : 11, weight: .semibold)
                 inner.addArrangedSubview(iv)
@@ -2635,8 +2659,31 @@ final class LiquidGlassToggle: NSView {
 
 /// Signature LoopSearch Horizon Squircle Logo:
 /// Deep pitch-obsidian squircle with a metallic silver-charcoal top dome, bottom-up incandescent white-cyan -> electric azure -> indigo-violet Horizon Light Pool, and a luminous ice-cyan inner loop mark.
+/// Resolves an SF Symbol name, or the app's own logo when `loopsearch.logo` is requested.
+@MainActor
+func loopSymbolImage(_ name: String, accessibility: String?, pointSize: CGFloat) -> NSImage? {
+    if name == LoopBrandLogoView.symbolToken {
+        return LoopBrandLogoView.renderedImage(side: pointSize + 5)
+    }
+    return NSImage(systemSymbolName: name, accessibilityDescription: accessibility)
+}
+
 final class LoopBrandLogoView: NSView {
+    static let symbolToken = "loopsearch.logo"
     private let logoSize: CGFloat
+
+    /// Rasterises the brand logo using resolution-independent AppKit drawing.
+    static func renderedImage(side: CGFloat) -> NSImage? {
+        let view = LoopBrandLogoView(size: side)
+        let bounds = NSRect(x: 0, y: 0, width: side, height: side)
+        view.frame = bounds
+        let image = NSImage(size: bounds.size, flipped: false) { _ in
+            view.draw(bounds)
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
 
     convenience init(size: CGFloat) {
         self.init(frame: NSRect(x: 0, y: 0, width: size, height: size), logoSize: size)

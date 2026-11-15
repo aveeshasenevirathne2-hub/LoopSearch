@@ -166,7 +166,7 @@
                 <span class="step-title">Sign In with Google</span>
                 <span class="pill-badge" id="auth-status-badge">Required to Search</span>
               </div>
-              <p class="step-desc" id="auth-desc">Connect your Google account once to unlock overlay capture &amp; sync your session.</p>
+              <p class="step-desc" id="auth-desc">Connect your Google account once to enable overlay capture &amp; sync your session.</p>
               <div id="auth-action-slot"></div>
             </div>
           </div>
@@ -203,7 +203,7 @@
   <script>
     (function () {
       const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars, staggerReveal } = window.LoopUI;
-      document.getElementById('brand-icon').innerHTML = Icons.brandMark(24);
+      document.getElementById('brand-icon').innerHTML = Icons.brandMark(34);
       document.getElementById('close-btn').innerHTML = Icons.close(13);
       document.getElementById('try-icon').innerHTML = Icons.sparkle(14);
       initHorizonLightWell(document.getElementById('glass-shell'));
@@ -261,7 +261,7 @@
           badge.classList.remove('success');
           desc.textContent = signingIn
             ? 'Finish signing in via your browser tab — LoopSearch will connect automatically.'
-            : 'Connect your Google account once to unlock overlay search & cloud sync.';
+            : 'Connect your Google account once to enable overlay search & cloud sync.';
           slot.innerHTML = `
             <button class="google-btn" id="google-signin-btn">
               ${signingIn ? '<span class="google-spinner"></span>' : Icons.googleG(15)}

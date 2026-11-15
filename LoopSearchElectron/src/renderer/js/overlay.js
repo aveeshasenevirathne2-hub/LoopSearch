@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  const { Icons, applyGlassAppearance, renderOpticalOrbHtml, staggerReveal } = window.LoopUI;
+  const { Icons, applyGlassAppearance, renderOpticalOrbHtml, staggerReveal, springPop } = window.LoopUI;
   const {
     extractPrimaryURL,
     displayHostForUrl,
@@ -111,7 +111,7 @@
     if (isDismissing) return;
     isDismissing = true;
     if (overlayRoot) overlayRoot.classList.add('closing');
-    setTimeout(() => window.loopSearch.closeOverlay(), 175);
+    setTimeout(() => window.loopSearch.closeOverlay(), 245);
   }
 
   function emitRectShockwave(sel) {
@@ -136,6 +136,8 @@
 
     document.getElementById('sheet-back-btn').innerHTML = Icons.back(14);
     document.getElementById('sheet-brand').innerHTML = Icons.brandMark(18);
+    const aiCardBrand = document.getElementById('ai-card-brand');
+    if (aiCardBrand) aiCardBrand.innerHTML = Icons.brandMark(15);
     document.getElementById('sheet-dark-btn').innerHTML = Icons.moon(13);
     document.getElementById('sheet-pin-btn').innerHTML = Icons.pin(13);
     document.getElementById('sheet-ext-btn').innerHTML = Icons.external(13);
@@ -178,7 +180,9 @@
   function setMode(mode) {
     activeMode = mode;
     document.querySelectorAll('.mode-pill').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.mode === mode);
+      const active = btn.dataset.mode === mode;
+      btn.classList.toggle('active', active);
+      if (active && springPop) springPop(btn);
     });
     const hints = {
       box: 'Drag a box around anything',
@@ -258,7 +262,8 @@
         vy: Math.sin(ang) * sp,
         life: 0,
         maxLife: 0.45 + Math.random() * 0.45,
-        r: 1.4 + Math.random() * 2.2,
+        r: 1.5 + Math.random() * 2.5,
+        star: i % 2 === 0,
         color: palette[i % palette.length]
       });
     }
@@ -606,6 +611,27 @@
         bg.addColorStop(1, 'transparent');
         fxCtx.fillStyle = bg;
         fxCtx.fillRect(activeSel.rect.x, by - 26, activeSel.rect.w, 52);
+
+        // Precision Dial Arc Chronometer Sweep inside analyzing crop (matches macOS PrecisionDialArcView)
+        const dcx = activeSel.rect.x + activeSel.rect.w / 2;
+        const dcy = activeSel.rect.y + activeSel.rect.h / 2;
+        const dr = Math.max(18, Math.min(activeSel.rect.w, activeSel.rect.h) * 0.34);
+        fxCtx.save();
+        fxCtx.translate(dcx, dcy);
+        fxCtx.rotate(elapsed * 1.45);
+        fxCtx.strokeStyle = 'rgba(186, 230, 253, 0.32)';
+        fxCtx.lineWidth = 1.25;
+        fxCtx.setLineDash([4, 6]);
+        fxCtx.beginPath();
+        fxCtx.arc(0, 0, dr, 0, Math.PI * 2);
+        fxCtx.stroke();
+        fxCtx.setLineDash([]);
+        fxCtx.strokeStyle = 'rgba(125, 211, 252, 0.72)';
+        fxCtx.lineWidth = 1.8;
+        fxCtx.beginPath();
+        fxCtx.arc(0, 0, dr, -Math.PI * 0.35, Math.PI * 0.18);
+        fxCtx.stroke();
+        fxCtx.restore();
         fxCtx.restore();
       }
     }
@@ -689,11 +715,22 @@
       pt.vy *= 0.94;
       const a = 1 - pt.life / pt.maxLife;
       fxCtx.save();
-      fxCtx.globalAlpha = a * 0.9;
+      fxCtx.globalAlpha = a * 0.92;
       fxCtx.fillStyle = pt.color;
-      fxCtx.beginPath();
-      fxCtx.arc(pt.x, pt.y, pt.r * a + 0.5, 0, Math.PI * 2);
-      fxCtx.fill();
+      if (pt.star) {
+        const sr = pt.r * a * 1.45 + 0.6;
+        fxCtx.beginPath();
+        fxCtx.moveTo(pt.x, pt.y - sr);
+        fxCtx.quadraticCurveTo(pt.x, pt.y, pt.x + sr, pt.y);
+        fxCtx.quadraticCurveTo(pt.x, pt.y, pt.x, pt.y + sr);
+        fxCtx.quadraticCurveTo(pt.x, pt.y, pt.x - sr, pt.y);
+        fxCtx.quadraticCurveTo(pt.x, pt.y, pt.x, pt.y - sr);
+        fxCtx.fill();
+      } else {
+        fxCtx.beginPath();
+        fxCtx.arc(pt.x, pt.y, pt.r * a + 0.5, 0, Math.PI * 2);
+        fxCtx.fill();
+      }
       fxCtx.restore();
     }
 
@@ -1307,7 +1344,9 @@
   document.getElementById('engine-cycle-btn').onclick = () => {
     const nextIdx = (ENGINE_ORDER.indexOf(activeEngine) + 1) % ENGINE_ORDER.length;
     activeEngine = ENGINE_ORDER[nextIdx];
-    document.getElementById('engine-cycle-btn').textContent = `${ENGINE_LABELS[activeEngine]} ▾`;
+    const btn = document.getElementById('engine-cycle-btn');
+    btn.textContent = `${ENGINE_LABELS[activeEngine]} ▾`;
+    if (springPop) springPop(btn);
     if (followUpInput.value.trim()) {
       navigateWebview(buildSearchUrl(activeEngine, followUpInput.value));
     } else if (activeEngine === 'googleLens' && lastLensUrl) {
@@ -1403,24 +1442,52 @@
   });
 
   function makeElementDraggable(targetEl, handleEl, onFirstDrag = null) {
+    let glideRaf = 0;
     handleEl.addEventListener('pointerdown', (e) => {
       if (e.target.closest('button')) return;
       e.preventDefault();
+      if (glideRaf) cancelAnimationFrame(glideRaf);
       if (onFirstDrag) onFirstDrag();
       const rect = targetEl.getBoundingClientRect();
       targetEl.style.left = `${rect.left}px`;
       targetEl.style.top = `${rect.top}px`;
+      let curX = rect.left;
+      let curY = rect.top;
       const ox = e.clientX - rect.left;
       const oy = e.clientY - rect.top;
+      let lastX = e.clientX;
+      let lastY = e.clientY;
+      let lastT = performance.now();
+      let vx = 0;
+      let vy = 0;
       const onMove = (ev) => {
-        const nx = Math.max(6, Math.min(screenW - rect.width - 6, ev.clientX - ox));
-        const ny = Math.max(6, Math.min(screenH - rect.height - 6, ev.clientY - oy));
-        targetEl.style.left = `${nx}px`;
-        targetEl.style.top = `${ny}px`;
+        const nowT = performance.now();
+        const dt = Math.max(8, nowT - lastT) / 1000;
+        vx = ((ev.clientX - lastX) / dt) * 0.45 + vx * 0.55;
+        vy = ((ev.clientY - lastY) / dt) * 0.45 + vy * 0.55;
+        lastX = ev.clientX;
+        lastY = ev.clientY;
+        lastT = nowT;
+        curX = Math.max(6, Math.min(screenW - rect.width - 6, ev.clientX - ox));
+        curY = Math.max(6, Math.min(screenH - rect.height - 6, ev.clientY - oy));
+        targetEl.style.left = `${curX}px`;
+        targetEl.style.top = `${curY}px`;
       };
       const onUp = () => {
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
+        if (Math.hypot(vx, vy) > 45) {
+          const step = () => {
+            vx *= 0.86;
+            vy *= 0.86;
+            curX = Math.max(6, Math.min(screenW - rect.width - 6, curX + vx / 60));
+            curY = Math.max(6, Math.min(screenH - rect.height - 6, curY + vy / 60));
+            targetEl.style.left = `${curX}px`;
+            targetEl.style.top = `${curY}px`;
+            if (Math.hypot(vx, vy) > 12) glideRaf = requestAnimationFrame(step);
+          };
+          glideRaf = requestAnimationFrame(step);
+        }
       };
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);

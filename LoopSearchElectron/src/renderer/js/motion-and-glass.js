@@ -1,18 +1,58 @@
 (function () {
   'use strict';
 
+  let brandUid = 0;
+
   const Icons = {
     brandMark(size = 20) {
-      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none">
+      const uid = `ls${++brandUid}`;
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" style="display:block;flex-shrink:0;">
         <defs>
-          <linearGradient id="ls-g" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stop-color="#38bdf8"/>
-            <stop offset="50%" stop-color="#60a5fa"/>
-            <stop offset="100%" stop-color="#2563eb"/>
+          <linearGradient id="${uid}-dome" x1="12" y1="1" x2="12" y2="12.5" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#8f96a6" stop-opacity="0.68"/>
+            <stop offset="42%" stop-color="#424757" stop-opacity="0.32"/>
+            <stop offset="100%" stop-color="#030408" stop-opacity="0"/>
           </linearGradient>
+          <linearGradient id="${uid}-horizon" x1="12" y1="23" x2="12" y2="10.2" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#f0fcff" stop-opacity="0.98"/>
+            <stop offset="18%" stop-color="#24c7ff" stop-opacity="0.92"/>
+            <stop offset="42%" stop-color="#0580fa" stop-opacity="0.72"/>
+            <stop offset="70%" stop-color="#293894" stop-opacity="0.44"/>
+            <stop offset="100%" stop-color="#030408" stop-opacity="0"/>
+          </linearGradient>
+          <radialGradient id="${uid}-core" cx="50%" cy="100%" r="58%">
+            <stop offset="0%" stop-color="#faffff" stop-opacity="0.96"/>
+            <stop offset="48%" stop-color="#2ed1ff" stop-opacity="0.68"/>
+            <stop offset="100%" stop-color="#030408" stop-opacity="0"/>
+          </radialGradient>
+          <linearGradient id="${uid}-loop" x1="12" y1="6" x2="12" y2="18" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#c7dcf5" stop-opacity="0.92"/>
+            <stop offset="48%" stop-color="#5cdbff" stop-opacity="0.96"/>
+            <stop offset="100%" stop-color="#f5fcff" stop-opacity="0.98"/>
+          </linearGradient>
+          <linearGradient id="${uid}-rim" x1="12" y1="1" x2="12" y2="23" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#e0e8f5" stop-opacity="0.78"/>
+            <stop offset="48%" stop-color="#4261ad" stop-opacity="0.30"/>
+            <stop offset="82%" stop-color="#29c7ff" stop-opacity="0.88"/>
+            <stop offset="100%" stop-color="#f2feff" stop-opacity="1"/>
+          </linearGradient>
+          <clipPath id="${uid}-clip">
+            <rect x="1" y="1" width="22" height="22" rx="6"/>
+          </clipPath>
         </defs>
-        <path d="M11 3.5a7.5 7.5 0 1 0 5.3 12.8l3.6 3.6" stroke="url(#ls-g)" stroke-width="2.4" stroke-linecap="round"/>
-        <circle cx="11" cy="11" r="3.1" fill="#e0f2fe" fill-opacity="0.9"/>
+        <g clip-path="url(#${uid}-clip)">
+          <rect x="1" y="1" width="22" height="22" fill="#030408"/>
+          <rect x="1" y="1" width="22" height="22" fill="url(#${uid}-dome)"/>
+          <rect x="1" y="1" width="22" height="22" fill="url(#${uid}-horizon)"/>
+          <ellipse cx="12" cy="23" rx="14" ry="9" fill="url(#${uid}-core)"/>
+          <path d="M 8.9 15.56 C 6.93 13.59, 6.65 11.62, 7.21 9.93 C 8.2 7.26, 10.87 6.13, 13.41 6.69 C 16.22 7.4, 17.49 9.79, 16.79 12.47 C 15.94 14.72, 13.55 15.56, 11.3 15 C 9.47 14.44, 12.84 10.92, 15.1 8.81"
+                stroke="#38bdf8" stroke-opacity="0.36" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M 8.9 15.56 C 6.93 13.59, 6.65 11.62, 7.21 9.93 C 8.2 7.26, 10.87 6.13, 13.41 6.69 C 16.22 7.4, 17.49 9.79, 16.79 12.47 C 15.94 14.72, 13.55 15.56, 11.3 15 C 9.47 14.44, 12.84 10.92, 15.1 8.81"
+                stroke="url(#${uid}-loop)" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="15.1" cy="8.81" r="1.85" fill="#59e0ff" fill-opacity="0.55"/>
+          <circle cx="15.1" cy="8.81" r="1.05" fill="#ffffff"/>
+        </g>
+        <rect x="1.35" y="1.35" width="21.3" height="21.3" rx="5.7" stroke="url(#${uid}-rim)" stroke-width="0.95"/>
       </svg>`;
     },
     close(size = 13) {
@@ -129,8 +169,16 @@
       el.classList.remove('stagger-animate');
       void el.offsetWidth;
       el.style.setProperty('--stagger-delay', `${baseDelayMs + idx * stepDelayMs}ms`);
+      el.style.setProperty('--stagger-tilt', `${idx % 2 === 0 ? -1.4 : 1.4}deg`);
       el.classList.add('stagger-animate');
     });
+  }
+
+  function springPop(el) {
+    if (!el || !el.classList) return;
+    el.classList.remove('spring-pop');
+    void el.offsetWidth;
+    el.classList.add('spring-pop');
   }
 
   function initSegmentedThumb(segmentedEl) {
@@ -214,6 +262,10 @@
       <div class="orb-ripple"></div>
       <div class="orb-ripple r2"></div>
       <div class="orb-ripple r3"></div>
+      <svg class="orb-dial-arc" viewBox="0 0 100 100" fill="none">
+        <circle cx="50" cy="50" r="44" stroke="rgba(125,211,252,0.22)" stroke-width="1" stroke-dasharray="3 5"/>
+        <path d="M50 6 A44 44 0 0 1 94 50" stroke="rgba(186,230,253,0.65)" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
       <div class="orb-ring-outer"></div>
       <div class="orb-ring-inner"></div>
       <div class="orb-core"></div>
@@ -232,6 +284,7 @@
     initHorizonLightWell,
     initSpecularInteractive,
     staggerReveal,
+    springPop,
     initSegmentedThumb,
     initDialogStars,
     renderOpticalOrbHtml
