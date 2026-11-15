@@ -95,7 +95,7 @@ let subAttr: [NSAttributedString.Key: Any] = [
     .font: NSFont.systemFont(ofSize: 12.5, weight: .medium),
     .foregroundColor: NSColor(red: 0.70, green: 0.82, blue: 0.98, alpha: 0.78)
 ]
-let subStr = NSAttributedString(string: "Version 1.0.1 • Drag LoopSearch into Applications to install", attributes: subAttr)
+let subStr = NSAttributedString(string: "Version 1.0.2 • Drag LoopSearch into Applications to install", attributes: subAttr)
 let subSize = subStr.size()
 subStr.draw(at: NSPoint(x: (pointSize.width - subSize.width) / 2, y: pointSize.height - 86))
 

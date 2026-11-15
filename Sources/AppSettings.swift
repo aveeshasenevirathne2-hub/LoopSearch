@@ -1095,7 +1095,7 @@ final class AppUpdateChecker {
     private var progressPanel: UpdateProgressWindow?
 
     static var currentVersion: String {
-        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.1"
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.2"
     }
 
     private struct GitHubRelease: Decodable {

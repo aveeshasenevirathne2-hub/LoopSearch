@@ -3261,6 +3261,110 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     private var shimmerLayer = CAGradientLayer()
     private var loadingFallbackTask: Task<Void, Never>?
 
+    private static func webColorSchemeScript(dark: Bool) -> String {
+        if !dark {
+            return """
+            (function() {
+                var st = document.getElementById('cts-dark-theme-style');
+                if (st) st.remove();
+                document.documentElement.style.colorScheme = 'light';
+                var bgEls = document.querySelectorAll('[data-cts-dark-bg]');
+                for (var i = 0; i < bgEls.length; i++) {
+                    bgEls[i].style.removeProperty('background-color');
+                    bgEls[i].style.removeProperty('border-color');
+                    bgEls[i].removeAttribute('data-cts-dark-bg');
+                }
+                var fgEls = document.querySelectorAll('[data-cts-dark-fg]');
+                for (var j = 0; j < fgEls.length; j++) {
+                    fgEls[j].style.removeProperty('color');
+                    fgEls[j].removeAttribute('data-cts-dark-fg');
+                }
+            })();
+            """
+        }
+        return """
+        (function() {
+            if (location.pathname.indexOf('/sorry') === 0) return;
+            document.documentElement.style.colorScheme = 'dark';
+            var st = document.getElementById('cts-dark-theme-style');
+            if (!st) {
+                st = document.createElement('style');
+                st.id = 'cts-dark-theme-style';
+                st.textContent = `
+                    :root, html, body {
+                        color-scheme: dark !important;
+                        background-color: #090e1a !important;
+                        color: #e8eef7 !important;
+                    }
+                    a, a * { color: #7cc4ff !important; }
+                    svg { color: #9fc5f8; }
+                `;
+                (document.head || document.documentElement).appendChild(st);
+            }
+            var nodes = document.querySelectorAll('body, main, section, article, aside, nav, div, ul, li, g-card, c-wiz, [role="tabpanel"], [role="dialog"], [role="button"], button, span, p, h1, h2, h3, h4');
+            for (var i = 0; i < nodes.length; i++) {
+                var el = nodes[i];
+                if (el.tagName === 'IMG' || el.tagName === 'VIDEO' || el.tagName === 'CANVAS') continue;
+                var cs = window.getComputedStyle(el);
+                var bg = cs.backgroundColor;
+                if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+                    var m = bg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?\\)/);
+                    if (m) {
+                        var r = +m[1], g = +m[2], b = +m[3], a = m[4] !== undefined ? +m[4] : 1;
+                        if (a > 0.2 && r > 180 && g > 180 && b > 180) {
+                            var isRoot = (el.tagName === 'BODY' || el.tagName === 'MAIN');
+                            el.style.setProperty('background-color', isRoot ? '#090e1a' : 'rgba(17, 25, 42, 0.90)', 'important');
+                            el.style.setProperty('border-color', 'rgba(130, 175, 255, 0.16)', 'important');
+                            el.setAttribute('data-cts-dark-bg', '1');
+                        }
+                    }
+                }
+                var fg = cs.color;
+                if (fg) {
+                    var fm = fg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+                    if (fm) {
+                        var fr = +fm[1], fgv = +fm[2], fb = +fm[3];
+                        if (fr < 115 && fgv < 115 && fb < 115) {
+                            el.style.setProperty('color', (fr > 65 && fgv > 65) ? '#a3b6d0' : '#eaf1fb', 'important');
+                            el.setAttribute('data-cts-dark-fg', '1');
+                        }
+                    }
+                }
+            }
+        })();
+        """
+    }
+
+    private var isEffectiveDarkMode: Bool {
+        switch AppSettings.shared.theme {
+        case .dark:
+            return true
+        case .light:
+            return false
+        case .system:
+            return effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+    }
+
+    private func syncWebViewAppearance() {
+        guard webView != nil else { return }
+        let dark = isEffectiveDarkMode
+        webView.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        webView.setValue(false, forKey: "drawsBackground")
+        webView.underPageBackgroundColor = dark
+            ? NSColor(red: 0.035, green: 0.055, blue: 0.10, alpha: 1.0)
+            : NSColor(white: 0.98, alpha: 1.0)
+
+        if let current = webView.url, current.host?.contains("google.") == true, !current.path.hasPrefix("/sorry") {
+            webView.evaluateJavaScript(Self.webColorSchemeScript(dark: dark), completionHandler: nil)
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        syncWebViewAppearance()
+    }
+
     private static let googleLensCleanUpScript = """
     (function() {
         if (location.pathname.indexOf('/sorry') === 0) return;
@@ -4099,6 +4203,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         webView.alphaValue = 0.0
         webView.translatesAutoresizingMaskIntoConstraints = false
         webClipView.addSubview(webView)
+        syncWebViewAppearance()
 
         // GPU-composited Searching Overlay (zero nested NSGlassEffectView blur & zero per-frame CPU CGGradient draws)
         loadingOverlay = AdaptiveSurfaceView(
@@ -4574,11 +4679,13 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     // MARK: - WKNavigationDelegate & WKUIDelegate
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        syncWebViewAppearance()
         // Early cleanup injection so duplicate search bars and gaps are stripped before reveal
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
             guard let self else { return }
             if let current = self.webView.url, current.host?.contains("google.") == true, !current.path.hasPrefix("/sorry") {
                 self.webView.evaluateJavaScript(Self.googleLensCleanUpScript, completionHandler: nil)
+                self.webView.evaluateJavaScript(Self.webColorSchemeScript(dark: self.isEffectiveDarkMode), completionHandler: nil)
             }
         }
     }
@@ -4636,6 +4743,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                         baseLensURL = current
                     }
                     webView.evaluateJavaScript(Self.googleLensCleanUpScript, completionHandler: nil)
+                    webView.evaluateJavaScript(Self.webColorSchemeScript(dark: isEffectiveDarkMode), completionHandler: nil)
                 }
             }
         }
