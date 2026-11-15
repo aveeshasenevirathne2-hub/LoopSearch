@@ -417,6 +417,20 @@ private final class SettingsContentView: NSView {
         titleStack.alignment = .leading
         titleStack.spacing = 1
 
+        let howToUseBtn = LiquidGlassButton(
+            symbol: "book.pages",
+            symbolPointSize: 10.5,
+            symbolWeight: .semibold,
+            title: "How to Use",
+            tooltip: "Open quick How-to-Use guide",
+            height: 26,
+            style: .clear,
+            foregroundColor: .labelColor,
+            font: .systemFont(ofSize: 11, weight: .medium)
+        ) {
+            HowToUseWindowController.shared.show()
+        }
+
         let welcomeBtn = LiquidGlassButton(
             symbol: "sparkles",
             symbolPointSize: 10.5,
@@ -462,7 +476,7 @@ private final class SettingsContentView: NSView {
         let headerSpacer = NSView()
         headerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let headerRow = NSStackView(views: [logo, titleStack, headerSpacer, welcomeBtn, updatesBtn, aboutBtn])
+        let headerRow = NSStackView(views: [logo, titleStack, headerSpacer, howToUseBtn, welcomeBtn, updatesBtn, aboutBtn])
         headerRow.orientation = .horizontal
         headerRow.alignment = .centerY
         headerRow.spacing = 10
@@ -1564,6 +1578,10 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
 
+    func dismiss() {
+        window?.close()
+    }
+
     func show(onStartOverlay: (() -> Void)? = nil) {
         if let existing = window {
             existing.makeKeyAndOrderFront(nil)
@@ -2001,6 +2019,409 @@ private final class OnboardingContentView: NSView {
             row.leadingAnchor.constraint(equalTo: card.contentContainer.leadingAnchor, constant: 14),
             row.trailingAnchor.constraint(equalTo: card.contentContainer.trailingAnchor, constant: -14),
             row.centerYAnchor.constraint(equalTo: card.contentContainer.centerYAnchor)
+        ])
+
+        return card
+    }
+}
+
+// MARK: - Post-Sign-In "How to Use LoopSearch" Guide
+
+@MainActor
+final class HowToUseWindowController: NSObject, NSWindowDelegate {
+    static let shared = HowToUseWindowController()
+
+    private var window: NSWindow?
+    private var startOverlayHandler: (() -> Void)?
+
+    func show(justSignedIn: Bool = false, onStartOverlay: (() -> Void)? = nil) {
+        if let onStartOverlay {
+            self.startOverlayHandler = onStartOverlay
+        }
+
+        if let existing = window {
+            existing.contentView = HowToUseContentView(
+                frame: existing.contentLayoutRect,
+                justSignedIn: justSignedIn,
+                onOpenStudio: { [weak self] in
+                    self?.window?.close()
+                    SettingsWindowController.shared.show()
+                },
+                onClose: { [weak self] tryNow in
+                    self?.window?.close()
+                    if tryNow {
+                        self?.startOverlayHandler?()
+                    }
+                }
+            )
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let rect = NSRect(x: 0, y: 0, width: 540, height: 610)
+        let win = NSWindow(
+            contentRect: rect,
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        win.title = "How to Use LoopSearch"
+        win.titlebarAppearsTransparent = true
+        win.titleVisibility = .hidden
+        win.isMovableByWindowBackground = true
+        win.isOpaque = false
+        win.backgroundColor = .clear
+        win.hasShadow = true
+        win.level = .floating
+        win.center()
+        win.delegate = self
+        win.isReleasedWhenClosed = false
+
+        win.contentView = HowToUseContentView(
+            frame: rect,
+            justSignedIn: justSignedIn,
+            onOpenStudio: { [weak self] in
+                self?.window?.close()
+                SettingsWindowController.shared.show()
+            },
+            onClose: { [weak self] tryNow in
+                self?.window?.close()
+                if tryNow {
+                    self?.startOverlayHandler?()
+                }
+            }
+        )
+        win.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        self.window = win
+    }
+}
+
+@MainActor
+private final class HowToUseContentView: NSView {
+    private let justSignedIn: Bool
+    private let onOpenStudio: () -> Void
+    private let onClose: (Bool) -> Void
+    private var permissionBanner: NSView?
+    private var permissionLabel: NSTextField?
+
+    init(
+        frame frameRect: NSRect,
+        justSignedIn: Bool,
+        onOpenStudio: @escaping () -> Void,
+        onClose: @escaping (Bool) -> Void
+    ) {
+        self.justSignedIn = justSignedIn
+        self.onOpenStudio = onOpenStudio
+        self.onClose = onClose
+        super.init(frame: frameRect)
+        setupUI()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func setupUI() {
+        let card = LiquidGlassSurfaceView(
+            cornerRadius: 24,
+            style: .regular,
+            tintColor: NSColor(red: 0.026, green: 0.034, blue: 0.072, alpha: 0.92),
+            lightTintColor: NSColor(white: 0.96, alpha: 0.94)
+        )
+        card.horizonGlowIntensity = 0.88
+        card.horizonPoolHeightFraction = 0.42
+        card.horizonRimStrength = 1.20
+        card.horizonWellView.setContinuousWaveEnabled(true)
+        card.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(card)
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor),
+            card.topAnchor.constraint(equalTo: topAnchor),
+            card.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.contentContainer.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: card.contentContainer.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: card.contentContainer.trailingAnchor, constant: -24),
+            stack.topAnchor.constraint(equalTo: card.contentContainer.topAnchor, constant: 22),
+            stack.bottomAnchor.constraint(equalTo: card.contentContainer.bottomAnchor, constant: -20)
+        ])
+
+        // Header
+        let logo = LoopBrandLogoView(size: 40)
+        let titleText = justSignedIn ? "You're Signed In!" : "How to Use LoopSearch"
+        let title = NSTextField(labelWithString: titleText)
+        title.font = .systemFont(ofSize: 20, weight: .bold)
+        title.textColor = .labelColor
+
+        let signedDetail: String = {
+            if justSignedIn, let session = FirebaseAuthService.shared.session {
+                let name = session.effectiveDisplayName
+                return session.email.isEmpty
+                    ? "Welcome, \(name). Here is how to search anything on your screen."
+                    : "Signed in as \(name) (\(session.email)). Here is how to get started."
+            }
+            return "Circle, box, tap, or extract text from anything on your Mac."
+        }()
+        let subtitle = NSTextField(wrappingLabelWithString: signedDetail)
+        subtitle.font = .systemFont(ofSize: 12.5, weight: .regular)
+        subtitle.textColor = .secondaryLabelColor
+
+        let titleCol = NSStackView(views: [title, subtitle])
+        titleCol.orientation = .vertical
+        titleCol.alignment = .leading
+        titleCol.spacing = 2
+
+        let header = NSStackView(views: [logo, titleCol])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 12
+        stack.addArrangedSubview(header)
+        header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+
+        let hotkey = AppSettings.shared.activeHotkeyDisplayString
+
+        // 4 Clear How-To Cards
+        let steps: [(symbol: String, title: String, body: String, badge: String)] = [
+            (
+                "command.square.fill",
+                "1. Launch From Any App",
+                "Press \(hotkey) anywhere on your Mac, or click the LoopSearch icon in the top menu bar.",
+                hotkey
+            ),
+            (
+                "lasso.sparkles",
+                "2. Select Anything on Screen",
+                "Draw a freehand loop or box, click a window/object in Tap mode, or drag over text to copy it.",
+                "1 Box • 2 Loop • 3 Tap • 4 OCR"
+            ),
+            (
+                "sparkle.magnifyingglass",
+                "3. Search, Copy Text, or Ask AI",
+                "Send your selection to Google Lens, Google, Perplexity, Bing, or Ask AI — or copy OCR text in one click.",
+                "Lens • OCR • Ask AI"
+            ),
+            (
+                "slider.horizontal.3",
+                "4. Customize & Share Ideas",
+                "Press Esc anytime to cancel. Open LoopSearch Studio (⌘,) for themes, shortcuts, and Gemini AI setup.",
+                "Esc Cancel • ⌘, Studio"
+            )
+        ]
+
+        for step in steps {
+            let rowCard = makeGuideCard(
+                symbol: step.symbol,
+                title: step.title,
+                body: step.body,
+                badgeText: step.badge
+            )
+            stack.addArrangedSubview(rowCard)
+            rowCard.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+
+        // Optional Screen Recording Banner if not granted yet
+        if !CGPreflightScreenCaptureAccess() {
+            let banner = makeSettingsGlassCard(cornerRadius: 12)
+            banner.heightAnchor.constraint(equalToConstant: 46).isActive = true
+
+            let label = NSTextField(labelWithString: "Screen Recording access is needed before your first capture.")
+            label.font = .systemFont(ofSize: 11.5, weight: .medium)
+            label.textColor = .systemOrange
+            self.permissionLabel = label
+
+            let grantBtn = LiquidGlassButton(
+                symbol: "lock.open.display",
+                symbolPointSize: 10.5,
+                symbolWeight: .semibold,
+                title: "Grant Access",
+                tooltip: "Open macOS Screen Recording permission",
+                height: 26,
+                minWidth: 106,
+                style: .clear,
+                tintColor: NSColor(red: 0.08, green: 0.36, blue: 0.82, alpha: 0.86),
+                lightTintColor: NSColor(red: 0.12, green: 0.44, blue: 0.94, alpha: 0.92),
+                foregroundColor: .white,
+                font: .systemFont(ofSize: 11, weight: .semibold)
+            ) { [weak self] in
+                let ok = CGRequestScreenCaptureAccess()
+                self?.permissionLabel?.stringValue = ok
+                    ? "✓ Screen Recording permission granted!"
+                    : "Enable LoopSearch in System Settings → Screen Recording."
+                self?.permissionLabel?.textColor = ok ? .systemGreen : .systemOrange
+                if !ok, let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+
+            let spacer = NSView()
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+            let bRow = NSStackView(views: [label, spacer, grantBtn])
+            bRow.orientation = .horizontal
+            bRow.alignment = .centerY
+            bRow.spacing = 8
+            bRow.translatesAutoresizingMaskIntoConstraints = false
+            banner.contentContainer.addSubview(bRow)
+            NSLayoutConstraint.activate([
+                bRow.leadingAnchor.constraint(equalTo: banner.contentContainer.leadingAnchor, constant: 12),
+                bRow.trailingAnchor.constraint(equalTo: banner.contentContainer.trailingAnchor, constant: -12),
+                bRow.centerYAnchor.constraint(equalTo: banner.contentContainer.centerYAnchor)
+            ])
+            self.permissionBanner = banner
+            stack.addArrangedSubview(banner)
+            banner.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+
+        let vSpacer = NSView()
+        vSpacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        stack.addArrangedSubview(vSpacer)
+
+        // Footer Actions
+        let studioBtn = LiquidGlassButton(
+            symbol: "slider.horizontal.3",
+            symbolPointSize: 11,
+            symbolWeight: .medium,
+            title: "Studio Settings",
+            tooltip: "Open LoopSearch Studio",
+            height: 30,
+            minWidth: 122,
+            style: .clear,
+            foregroundColor: .labelColor,
+            font: .systemFont(ofSize: 12, weight: .medium)
+        ) { [weak self] in
+            self?.onOpenStudio()
+        }
+
+        let gotItBtn = LiquidGlassButton(
+            title: "Got It",
+            tooltip: "Close this guide",
+            height: 30,
+            minWidth: 78,
+            style: .clear,
+            foregroundColor: .labelColor,
+            font: .systemFont(ofSize: 12, weight: .semibold)
+        ) { [weak self] in
+            self?.onClose(false)
+        }
+
+        let tryNowBtn = LiquidGlassButton(
+            symbol: "sparkles",
+            symbolPointSize: 11.5,
+            symbolWeight: .semibold,
+            title: "Try LoopSearch Now",
+            tooltip: "Launch selection overlay right now",
+            height: 30,
+            minWidth: 162,
+            style: .clear,
+            tintColor: NSColor(red: 0.08, green: 0.38, blue: 0.86, alpha: 0.88),
+            lightTintColor: NSColor(red: 0.12, green: 0.44, blue: 0.94, alpha: 0.94),
+            foregroundColor: .white,
+            font: .systemFont(ofSize: 12, weight: .semibold)
+        ) { [weak self] in
+            self?.onClose(true)
+        }
+
+        let hSpacer = NSView()
+        hSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let footer = NSStackView(views: [studioBtn, hSpacer, gotItBtn, tryNowBtn])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        footer.spacing = 8
+        stack.addArrangedSubview(footer)
+        footer.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+    }
+
+    private func makeGuideCard(symbol: String, title: String, body: String, badgeText: String) -> NSView {
+        let card = makeSettingsGlassCard(cornerRadius: 14)
+        card.heightAnchor.constraint(greaterThanOrEqualToConstant: 76).isActive = true
+
+        let iconBox = NSView()
+        iconBox.wantsLayer = true
+        iconBox.layer?.cornerRadius = 11
+        iconBox.layer?.backgroundColor = NSColor(red: 0.10, green: 0.42, blue: 0.92, alpha: 0.22).cgColor
+        iconBox.layer?.borderWidth = 0.75
+        iconBox.layer?.borderColor = NSColor(red: 0.30, green: 0.84, blue: 1.0, alpha: 0.30).cgColor
+        iconBox.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            iconBox.widthAnchor.constraint(equalToConstant: 32),
+            iconBox.heightAnchor.constraint(equalToConstant: 32)
+        ])
+
+        let imgView = NSImageView()
+        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: title)?
+            .withSymbolConfiguration(.init(pointSize: 14, weight: .semibold)) {
+            imgView.image = img
+        }
+        imgView.contentTintColor = NSColor(red: 0.34, green: 0.86, blue: 1.0, alpha: 1.0)
+        imgView.translatesAutoresizingMaskIntoConstraints = false
+        iconBox.addSubview(imgView)
+        NSLayoutConstraint.activate([
+            imgView.centerXAnchor.constraint(equalTo: iconBox.centerXAnchor),
+            imgView.centerYAnchor.constraint(equalTo: iconBox.centerYAnchor)
+        ])
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .labelColor
+
+        let pill = NSView()
+        pill.wantsLayer = true
+        pill.layer?.cornerRadius = 6
+        pill.layer?.backgroundColor = NSColor(red: 0.16, green: 0.48, blue: 0.96, alpha: 0.16).cgColor
+        pill.translatesAutoresizingMaskIntoConstraints = false
+
+        let pillLabel = NSTextField(labelWithString: badgeText)
+        pillLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        pillLabel.textColor = NSColor(red: 0.38, green: 0.84, blue: 1.0, alpha: 0.95)
+        pillLabel.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(pillLabel)
+        NSLayoutConstraint.activate([
+            pillLabel.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 7),
+            pillLabel.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -7),
+            pillLabel.topAnchor.constraint(equalTo: pill.topAnchor, constant: 2),
+            pillLabel.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -2)
+        ])
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let topRow = NSStackView(views: [titleLabel, spacer, pill])
+        topRow.orientation = .horizontal
+        topRow.alignment = .centerY
+        topRow.spacing = 8
+
+        let bodyLabel = NSTextField(wrappingLabelWithString: body)
+        bodyLabel.font = .systemFont(ofSize: 11.5, weight: .regular)
+        bodyLabel.textColor = .secondaryLabelColor
+
+        let textCol = NSStackView(views: [topRow, bodyLabel])
+        textCol.orientation = .vertical
+        textCol.alignment = .leading
+        textCol.spacing = 4
+        topRow.widthAnchor.constraint(equalTo: textCol.widthAnchor).isActive = true
+
+        let row = NSStackView(views: [iconBox, textCol])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
+        row.translatesAutoresizingMaskIntoConstraints = false
+        card.contentContainer.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: card.contentContainer.leadingAnchor, constant: 14),
+            row.trailingAnchor.constraint(equalTo: card.contentContainer.trailingAnchor, constant: -14),
+            row.topAnchor.constraint(equalTo: card.contentContainer.topAnchor, constant: 10),
+            row.bottomAnchor.constraint(equalTo: card.contentContainer.bottomAnchor, constant: -10)
         ])
 
         return card

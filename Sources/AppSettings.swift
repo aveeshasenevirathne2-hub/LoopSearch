@@ -478,6 +478,7 @@ final class AppSettings {
         static let autoCheckForUpdates = "auto_check_for_updates"
         static let hasShownFirstToolbarHint = "has_shown_first_toolbar_hint"
         static let hasCompletedOnboarding = "has_completed_onboarding"
+        static let hasSeenHowToUseGuide = "has_seen_how_to_use_guide"
         static let searchUsageCount = "search_usage_count"
         static let lastFeedbackPromptUsageCount = "last_feedback_prompt_usage_count"
         static let hasSubmittedFeedback = "has_submitted_feedback"
@@ -619,6 +620,12 @@ final class AppSettings {
     var hasCompletedOnboarding: Bool {
         didSet {
             defaults.set(hasCompletedOnboarding, forKey: Keys.hasCompletedOnboarding)
+        }
+    }
+
+    var hasSeenHowToUseGuide: Bool {
+        didSet {
+            defaults.set(hasSeenHowToUseGuide, forKey: Keys.hasSeenHowToUseGuide)
         }
     }
 
@@ -787,6 +794,7 @@ final class AppSettings {
 
         self.hasShownFirstToolbarHint = defaults.bool(forKey: Keys.hasShownFirstToolbarHint)
         self.hasCompletedOnboarding = defaults.bool(forKey: Keys.hasCompletedOnboarding)
+        self.hasSeenHowToUseGuide = defaults.bool(forKey: Keys.hasSeenHowToUseGuide)
         self.searchUsageCount = defaults.integer(forKey: Keys.searchUsageCount)
         self.lastFeedbackPromptUsageCount = defaults.integer(forKey: Keys.lastFeedbackPromptUsageCount)
         self.hasSubmittedFeedback = defaults.bool(forKey: Keys.hasSubmittedFeedback)
@@ -1087,7 +1095,7 @@ final class AppUpdateChecker {
     private var progressPanel: UpdateProgressWindow?
 
     static var currentVersion: String {
-        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.0"
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.1"
     }
 
     private struct GitHubRelease: Decodable {

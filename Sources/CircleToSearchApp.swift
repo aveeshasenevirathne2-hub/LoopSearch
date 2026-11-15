@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let overlayController = OverlayWindowController()
     private let toastController = ToastWindowController()
     private var isOverlayOpen = false
+    private var lastObservedSignedInState = FirebaseAuthService.shared.isSignedIn
     nonisolated(unsafe) private var settingsObserver: NSObjectProtocol?
     nonisolated(unsafe) private var reopenHistoryObserver: NSObjectProtocol?
     nonisolated(unsafe) private var authObserver: NSObjectProtocol?
@@ -33,6 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openOnboarding() {
         OnboardingWindowController.shared.show { [weak self] in
+            self?.triggerCircleToSearch()
+        }
+    }
+
+    @objc private func openHowToUse() {
+        HowToUseWindowController.shared.show(justSignedIn: false) { [weak self] in
             self?.triggerCircleToSearch()
         }
     }
@@ -109,7 +116,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.rebuildMenu()
+                guard let self else { return }
+                self.rebuildMenu()
+                let isNowSignedIn = FirebaseAuthService.shared.isSignedIn
+                if !self.lastObservedSignedInState && isNowSignedIn {
+                    self.lastObservedSignedInState = true
+                    if !AppSettings.shared.hasSeenHowToUseGuide {
+                        AppSettings.shared.hasSeenHowToUseGuide = true
+                        AppSettings.shared.hasCompletedOnboarding = true
+                        OnboardingWindowController.shared.dismiss()
+                        HowToUseWindowController.shared.show(justSignedIn: true) { [weak self] in
+                            self?.triggerCircleToSearch()
+                        }
+                    }
+                } else {
+                    self.lastObservedSignedInState = isNowSignedIn
+                }
             }
         }
 
@@ -332,6 +354,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let onboardingItem = NSMenuItem(title: "Welcome Setup Guide...", action: #selector(openOnboarding), keyEquivalent: "")
         onboardingItem.target = self
         menu.addItem(onboardingItem)
+
+        let howToUseItem = NSMenuItem(title: "How to Use LoopSearch…", action: #selector(openHowToUse), keyEquivalent: "")
+        howToUseItem.target = self
+        menu.addItem(howToUseItem)
 
         let aboutItem = NSMenuItem(title: "About LoopSearch", action: #selector(openAbout), keyEquivalent: "")
         aboutItem.target = self
