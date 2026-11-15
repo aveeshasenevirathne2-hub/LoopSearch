@@ -3313,6 +3313,20 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                         background-color: #090e1a !important;
                         color: #edf2fb !important;
                     }
+                    code, pre, kbd, samp, tt, mark {
+                        background-color: rgba(34, 48, 76, 0.85) !important;
+                        color: #d6e8ff !important;
+                        border-color: rgba(130, 175, 255, 0.24) !important;
+                    }
+                    code *, pre *, kbd *, samp * {
+                        background-color: transparent !important;
+                        color: inherit !important;
+                    }
+                    table, th, td, blockquote, details, summary {
+                        background-color: rgba(17, 25, 42, 0.86) !important;
+                        color: #edf2fb !important;
+                        border-color: rgba(130, 175, 255, 0.18) !important;
+                    }
                     input, textarea {
                         background-color: rgba(18, 28, 46, 0.92) !important;
                         color: #edf2fb !important;
@@ -3328,14 +3342,17 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                 (document.head || document.documentElement).appendChild(st);
             }
             function applyDarkPass() {
-                if (!window.__ctsDarkEnabled) return;
-                var nodes = document.querySelectorAll('body, main, section, article, aside, nav, div, ul, li, g-card, c-wiz, [role="tabpanel"], [role="dialog"], [role="button"], button, span, p, h1, h2, h3, h4, strong, b, em, li');
+                if (!window.__ctsDarkEnabled || !document.body) return;
+                var skipTags = { IMG:1, VIDEO:1, CANVAS:1, PICTURE:1, SOURCE:1, SVG:1, PATH:1, CIRCLE:1, RECT:1, POLYGON:1, SCRIPT:1, STYLE:1, LINK:1, META:1, NOSCRIPT:1, BR:1, HR:1, CODE:1, PRE:1, KBD:1, SAMP:1, MARK:1 };
+                var nodes = [document.body];
+                var all = document.body.getElementsByTagName('*');
+                for (var k = 0; k < all.length; k++) { nodes.push(all[k]); }
                 for (var i = 0; i < nodes.length; i++) {
                     var el = nodes[i];
-                    if (el.tagName === 'IMG' || el.tagName === 'VIDEO' || el.tagName === 'CANVAS') continue;
+                    if (skipTags[el.tagName]) continue;
                     var cs = window.getComputedStyle(el);
                     var bgi = cs.backgroundImage;
-                    if (bgi && bgi.indexOf('gradient(') !== -1 && /(255|248|249|250|241|243|244|238|232|229)/.test(bgi)) {
+                    if (bgi && bgi.indexOf('gradient(') !== -1 && bgi.indexOf('url(') === -1 && /(255|248|249|250|241|243|244|238|232|229)/.test(bgi)) {
                         var hasMaskBg = (el.textContent || '').trim().length < 36 || el.querySelector('img') === null;
                         if (hasMaskBg) {
                             el.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(9, 14, 26, 0), rgba(9, 14, 26, 0.96))', 'important');
@@ -3347,7 +3364,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                         var m = bg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?\\)/);
                         if (m) {
                             var r = +m[1], g = +m[2], b = +m[3], a = m[4] !== undefined ? +m[4] : 1;
-                            if (a > 0.16 && r > 170 && g > 170 && b > 170) {
+                            if (a > 0.12 && r > 155 && g > 155 && b > 155) {
                                 var isRoot = (el.tagName === 'BODY' || el.tagName === 'MAIN');
                                 el.style.setProperty('background-color', isRoot ? '#090e1a' : 'rgba(17, 25, 42, 0.92)', 'important');
                                 el.style.setProperty('border-color', 'rgba(130, 175, 255, 0.16)', 'important');
