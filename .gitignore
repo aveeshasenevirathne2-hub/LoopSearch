@@ -15,5 +15,7 @@ firebase/.firebase/
 LoopSearchWindows/**/bin/
 LoopSearchWindows/**/obj/
 LoopSearchWindows/**/publish/
+LoopSearchWindows.Tests/**/bin/
+LoopSearchWindows.Tests/**/obj/
 *.exe
 *.pdb
