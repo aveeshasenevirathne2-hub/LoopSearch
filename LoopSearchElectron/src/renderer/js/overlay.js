@@ -89,6 +89,8 @@
 
   // Particle & animation state
   let overlayOpenedAt = performance.now();
+  let fxRafId = 0;
+  let lastFxDrawAt = 0;
   const stars = Array.from({ length: 26 }, () => ({
     x: Math.random(),
     y: Math.random(),
@@ -111,8 +113,21 @@
     if (isDismissing) return;
     isDismissing = true;
     if (overlayRoot) overlayRoot.classList.add('closing');
-    setTimeout(() => window.loopSearch.closeOverlay(), 245);
+    setTimeout(() => {
+      if (fxRafId) {
+        cancelAnimationFrame(fxRafId);
+        fxRafId = 0;
+      }
+      window.loopSearch.closeOverlay();
+    }, 220);
   }
+  window.addEventListener('pagehide', () => {
+    isDismissing = true;
+    if (fxRafId) {
+      cancelAnimationFrame(fxRafId);
+      fxRafId = 0;
+    }
+  });
 
   function emitRectShockwave(sel) {
     if (!sel || !sel.rect) return;
@@ -149,7 +164,7 @@
   populateStaticIcons();
 
   function setupCanvasSizes() {
-    dpr = window.devicePixelRatio || (initData && initData.scaleFactor) || 1;
+    dpr = Math.min(2, window.devicePixelRatio || (initData && initData.scaleFactor) || 1);
     screenCanvas.width = Math.max(1, Math.round(screenW * dpr));
     screenCanvas.height = Math.max(1, Math.round(screenH * dpr));
     screenCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -343,44 +358,12 @@
       ctx.stroke();
     }
 
-    // Sharp white-cyan inner specular hairline
+    // Sharp white-cyan inner specular hairline (matching macOS exterior-only halo without moving dot)
     makeSelectionPath(ctx, kind, rect, pts, closed);
     ctx.globalAlpha = 0.94;
     ctx.lineWidth = 1.65;
     ctx.strokeStyle = '#e0f2fe';
     ctx.stroke();
-
-    // Flowing bright comet spark gliding along perimeter
-    if (rect && rect.w > 24 && rect.h > 24 && kind === 'box') {
-      const p = ((elapsed * 0.42) % 1 + 1) % 1;
-      const perim = 2 * (rect.w + rect.h);
-      let d = p * perim;
-      let cxPt = rect.x;
-      let cyPt = rect.y;
-      if (d < rect.w) {
-        cxPt = rect.x + d;
-        cyPt = rect.y;
-      } else if ((d -= rect.w) < rect.h) {
-        cxPt = rect.x + rect.w;
-        cyPt = rect.y + d;
-      } else if ((d -= rect.h) < rect.w) {
-        cxPt = rect.x + rect.w - d;
-        cyPt = rect.y + rect.h;
-      } else {
-        d -= rect.w;
-        cxPt = rect.x;
-        cyPt = rect.y + rect.h - d;
-      }
-      const cg = ctx.createRadialGradient(cxPt, cyPt, 0.5, cxPt, cyPt, 18);
-      cg.addColorStop(0, '#ffffff');
-      cg.addColorStop(0.35, palette[0]);
-      cg.addColorStop(1, 'transparent');
-      ctx.globalAlpha = 0.92 * intensityMult;
-      ctx.fillStyle = cg;
-      ctx.beginPath();
-      ctx.arc(cxPt, cyPt, 18, 0, Math.PI * 2);
-      ctx.fill();
-    }
     ctx.restore();
   }
 
@@ -395,44 +378,68 @@
     const h = rect.h - pad * 2;
     const arm = Math.min(22, Math.min(w, h) * 0.28);
     const r = Math.min(16, arm * 0.72);
-    const breathAlpha = settledAt ? 0.78 + 0.22 * Math.sin(dt * 3.4) : 0.96;
+    const breathAlpha = settledAt ? 0.84 + 0.14 * Math.sin(dt * 2.8) : 0.96;
+
+    const strokeBrackets = () => {
+      ctx.beginPath();
+      // NW
+      ctx.moveTo(x, y + arm);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.lineTo(x + arm, y);
+      // NE
+      ctx.moveTo(x + w - arm, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + arm);
+      // SE
+      ctx.moveTo(x + w, y + h - arm);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + w - arm, y + h);
+      // SW
+      ctx.moveTo(x + arm, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + h - arm);
+      ctx.stroke();
+    };
 
     ctx.save();
-    ctx.globalAlpha = breathAlpha;
-    ctx.strokeStyle = '#ffffff';
-    ctx.shadowColor = '#38bdf8';
-    ctx.shadowBlur = 10;
-    ctx.lineWidth = 2.6;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    ctx.globalAlpha = breathAlpha * 0.24;
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 5.4;
+    strokeBrackets();
 
-    ctx.beginPath();
-    // NW
-    ctx.moveTo(x, y + arm);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
-    ctx.lineTo(x + arm, y);
-    // NE
-    ctx.moveTo(x + w - arm, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    ctx.lineTo(x + w, y + arm);
-    // SE
-    ctx.moveTo(x + w, y + h - arm);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + w - arm, y + h);
-    // SW
-    ctx.moveTo(x + arm, y + h);
-    ctx.lineTo(x + r, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    ctx.lineTo(x, y + h - arm);
-    ctx.stroke();
+    ctx.globalAlpha = breathAlpha;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.4;
+    strokeBrackets();
     ctx.restore();
   }
 
   function renderFxFrame(now) {
+    if (isDismissing && !overlayRoot.classList.contains('closing')) {
+      fxRafId = 0;
+      return;
+    }
     const elapsed = (now - overlayOpenedAt) / 1000;
+    const hasActiveBurst =
+      elapsed < 0.85 ||
+      Boolean(interaction) ||
+      isSearching ||
+      isOcrRunning ||
+      particles.length > 0 ||
+      ripples.length > 0 ||
+      rectRipples.length > 0;
+    const minFrameInterval = hasActiveBurst ? 22 : 95;
+    if (lastFxDrawAt && now - lastFxDrawAt < minFrameInterval) {
+      fxRafId = requestAnimationFrame(renderFxFrame);
+      return;
+    }
+    lastFxDrawAt = now;
     const style = settings.visualStylePreset || 'crystal';
     const intensityMult =
       settings.glowIntensity === 'vivid' ? 1.35 : settings.glowIntensity === 'subtle' ? 0.6 : 1;
@@ -607,31 +614,10 @@
         const by = activeSel.rect.y + beamFrac * activeSel.rect.h;
         const bg = fxCtx.createLinearGradient(0, by - 26, 0, by + 26);
         bg.addColorStop(0, 'transparent');
-        bg.addColorStop(0.5, 'rgba(56, 189, 248, 0.42)');
+        bg.addColorStop(0.5, 'rgba(56, 189, 248, 0.36)');
         bg.addColorStop(1, 'transparent');
         fxCtx.fillStyle = bg;
         fxCtx.fillRect(activeSel.rect.x, by - 26, activeSel.rect.w, 52);
-
-        // Precision Dial Arc Chronometer Sweep inside analyzing crop (matches macOS PrecisionDialArcView)
-        const dcx = activeSel.rect.x + activeSel.rect.w / 2;
-        const dcy = activeSel.rect.y + activeSel.rect.h / 2;
-        const dr = Math.max(18, Math.min(activeSel.rect.w, activeSel.rect.h) * 0.34);
-        fxCtx.save();
-        fxCtx.translate(dcx, dcy);
-        fxCtx.rotate(elapsed * 1.45);
-        fxCtx.strokeStyle = 'rgba(186, 230, 253, 0.32)';
-        fxCtx.lineWidth = 1.25;
-        fxCtx.setLineDash([4, 6]);
-        fxCtx.beginPath();
-        fxCtx.arc(0, 0, dr, 0, Math.PI * 2);
-        fxCtx.stroke();
-        fxCtx.setLineDash([]);
-        fxCtx.strokeStyle = 'rgba(125, 211, 252, 0.72)';
-        fxCtx.lineWidth = 1.8;
-        fxCtx.beginPath();
-        fxCtx.arc(0, 0, dr, -Math.PI * 0.35, Math.PI * 0.18);
-        fxCtx.stroke();
-        fxCtx.restore();
         fxCtx.restore();
       }
     }
@@ -672,8 +658,6 @@
       fxCtx.translate(-cx, -cy);
       makeSelectionPath(fxCtx, rr.kind, rr.rect, rr.points, true);
       fxCtx.strokeStyle = palette[0];
-      fxCtx.shadowColor = palette[1];
-      fxCtx.shadowBlur = 12;
       fxCtx.globalAlpha = Math.max(0, alpha) * intensityMult;
       fxCtx.lineWidth = Math.max(0.8, 3.4 * (1 - p));
       fxCtx.stroke();
@@ -734,7 +718,7 @@
       fxCtx.restore();
     }
 
-    requestAnimationFrame(renderFxFrame);
+    fxRafId = requestAnimationFrame(renderFxFrame);
   }
 
   function computeBounds(pts) {
@@ -1543,8 +1527,10 @@
     img.onload = () => {
       sourceImg = img;
       overlayOpenedAt = performance.now();
+      lastFxDrawAt = 0;
       drawFrozenScreen();
-      requestAnimationFrame(renderFxFrame);
+      if (fxRafId) cancelAnimationFrame(fxRafId);
+      fxRafId = requestAnimationFrame(renderFxFrame);
 
       if (payload.mockSelection) {
         settledSelection = {

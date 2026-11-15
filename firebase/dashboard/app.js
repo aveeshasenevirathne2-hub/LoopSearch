@@ -829,7 +829,7 @@ function renderBreakdowns() {
     e.eventType === "interactive_sign_in" ? "Interactive Google Sign-In" : "App Launch Session Resume"
   );
 
-  els.breakdownContent.appendChild(makeBreakdownSection("macOS Versions (Users)", osCounts, state.users.length));
+  els.breakdownContent.appendChild(makeBreakdownSection("OS Versions (Users)", osCounts, state.users.length));
   els.breakdownContent.appendChild(makeBreakdownSection("LoopSearch Builds (Users)", verCounts, state.users.length));
   if (state.loginEvents.length > 0) {
     els.breakdownContent.appendChild(makeBreakdownSection("Auth Event Mix (Recent 500)", flowCounts, state.loginEvents.length));

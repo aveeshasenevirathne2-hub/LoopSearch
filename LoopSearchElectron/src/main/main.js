@@ -16,7 +16,8 @@ const {
   dialog,
   shell,
   session,
-  nativeTheme
+  nativeTheme,
+  powerMonitor
 } = require('electron');
 
 const {
@@ -71,12 +72,17 @@ let latestUpdateState = null;
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.loopsearch.windows');
 }
+app.commandLine.appendSwitch('enable-features', 'CalculateNativeWinOcclusion');
+app.commandLine.appendSwitch('disable-renderer-backgrounding', 'false');
 
 const gotSingleLock = UI_CHECK_DIR ? true : app.requestSingleInstanceLock();
 if (!gotSingleLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
+    if (authService) {
+      authService.recordResumeHeartbeat({ minIntervalMs: 60 * 1000 }).catch(() => {});
+    }
     if (overlayWin && !overlayWin.isDestroyed()) {
       overlayWin.focus();
       return;
@@ -130,7 +136,7 @@ function createFramelessGlassWindow({
   alwaysOnTop = false,
   onReady = null
 }) {
-  const iconPath = path.join(BUILD_DIR, 'AppIcon.png');
+  const iconPath = path.join(BUILD_DIR, process.platform === 'win32' ? 'AppIcon.ico' : 'AppIcon.png');
   const win = new BrowserWindow({
     width,
     height,
@@ -364,6 +370,10 @@ async function startOverlay(options = {}) {
     showToast('Please sign in with Google to start searching', 'info');
     openManagedWindow('onboarding');
     return;
+  }
+
+  if (authService) {
+    authService.recordResumeHeartbeat({ minIntervalMs: 15 * 60 * 1000 }).catch(() => {});
   }
 
   isCapturing = true;
@@ -808,6 +818,9 @@ function wireIpcHandlers() {
   });
 
   ipcMain.handle('telemetry:search-success', () => {
+    if (authService) {
+      authService.recordResumeHeartbeat({ minIntervalMs: 15 * 60 * 1000 }).catch(() => {});
+    }
     const res = store.incrementSearchCount();
     if (res.shouldPromptForFeedback) {
       store.update({ lastFeedbackPromptCount: res.settings.searchCount });
@@ -1045,12 +1058,31 @@ app.whenReady().then(async () => {
   // Silent session resume telemetry (strictly sends 'session_resume' per firestore.rules)
   authService.restoreAndRecordResume().catch(() => {});
 
+  // Flush offline-queued analytics or wake-from-sleep sessions reliably
+  powerMonitor.on('resume', () => {
+    authService.recordResumeHeartbeat({ minIntervalMs: 5 * 60 * 1000 }).catch(() => {});
+  });
+  powerMonitor.on('unlock-screen', () => {
+    authService.recordResumeHeartbeat({ minIntervalMs: 15 * 60 * 1000 }).catch(() => {});
+  });
+  const pendingFlushTimer = setInterval(() => {
+    const pending = store.vault.get('pendingLoginEvents', []);
+    if (Array.isArray(pending) && pending.length > 0) {
+      authService.flushPendingEvents().catch(() => {});
+    }
+  }, 60 * 1000);
+  if (typeof pendingFlushTimer.unref === 'function') pendingFlushTimer.unref();
+
   setTimeout(() => {
     refreshUpdateState({ silent: true }).catch(() => {});
   }, 3500);
 
   const isBackgroundLaunch = cliArgs.includes('--background');
-  if (!isBackgroundLaunch && (!initialSettings.onboardingCompleted || !authService.isSignedIn())) {
-    openManagedWindow('onboarding');
+  if (!isBackgroundLaunch) {
+    if (!initialSettings.onboardingCompleted || !authService.isSignedIn()) {
+      openManagedWindow('onboarding');
+    } else {
+      showToast(`LoopSearch ready — Press ${initialSettings.hotkeyDisplay}`, 'info', 2600);
+    }
   }
 });

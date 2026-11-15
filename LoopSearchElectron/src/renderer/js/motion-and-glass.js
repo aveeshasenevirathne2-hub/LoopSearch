@@ -215,7 +215,7 @@
 
     function resize() {
       const rect = canvasEl.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
       canvasEl.width = Math.max(1, Math.round(rect.width * dpr));
       canvasEl.height = Math.max(1, Math.round(rect.height * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -224,7 +224,22 @@
     window.addEventListener('resize', resize);
 
     const start = performance.now();
+    let rafId = 0;
+    let lastDraw = 0;
+
+    function shouldAnimate() {
+      return !document.hidden && (document.hasFocus() || lastDraw === 0);
+    }
+
     function tick(now) {
+      rafId = 0;
+      if (!shouldAnimate()) return;
+      if (lastDraw && now - lastDraw < 66) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+      lastDraw = now;
+
       const t = (now - start) / 1000;
       const rect = canvasEl.getBoundingClientRect();
       const w = rect.width;
@@ -232,16 +247,13 @@
       ctx.clearRect(0, 0, w, h);
 
       const isDark = (document.documentElement.dataset.theme || 'dark') === 'dark';
+      ctx.fillStyle = isDark ? '#bae6fd' : '#0284c7';
       for (const s of stars) {
         const sx = s.x * w;
         const sy = (((s.y - t * s.vy) % 1) + 1) % 1 * h;
-        const a = (0.18 + 0.82 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase))) * (isDark ? 0.56 : 0.28);
+        const a = (0.18 + 0.82 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase))) * (isDark ? 0.52 : 0.28);
         const r = s.r;
-        ctx.save();
         ctx.globalAlpha = a;
-        ctx.fillStyle = isDark ? '#bae6fd' : '#0284c7';
-        ctx.shadowColor = isDark ? '#38bdf8' : 'transparent';
-        ctx.shadowBlur = isDark ? 6 : 0;
         ctx.beginPath();
         ctx.moveTo(sx, sy - r);
         ctx.quadraticCurveTo(sx, sy, sx + r, sy);
@@ -249,28 +261,39 @@
         ctx.quadraticCurveTo(sx, sy, sx - r, sy);
         ctx.quadraticCurveTo(sx, sy, sx, sy - r);
         ctx.fill();
-        ctx.restore();
       }
-      requestAnimationFrame(tick);
+      ctx.globalAlpha = 1;
+      rafId = requestAnimationFrame(tick);
     }
-    requestAnimationFrame(tick);
+
+    const schedule = () => {
+      if (!rafId && !document.hidden && document.hasFocus()) {
+        rafId = requestAnimationFrame(tick);
+      }
+    };
+    window.addEventListener('focus', schedule);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+      } else {
+        schedule();
+      }
+    });
+    rafId = requestAnimationFrame(tick);
   }
 
   function renderOpticalOrbHtml(compact = false) {
+    const iconSize = compact ? 13 : 18;
     return `<div class="optical-orb${compact ? ' compact' : ''}">
       <div class="orb-halo"></div>
       <div class="orb-ripple"></div>
       <div class="orb-ripple r2"></div>
-      <div class="orb-ripple r3"></div>
-      <svg class="orb-dial-arc" viewBox="0 0 100 100" fill="none">
-        <circle cx="50" cy="50" r="44" stroke="rgba(125,211,252,0.22)" stroke-width="1" stroke-dasharray="3 5"/>
-        <path d="M50 6 A44 44 0 0 1 94 50" stroke="rgba(186,230,253,0.65)" stroke-width="1.6" stroke-linecap="round"/>
-      </svg>
       <div class="orb-ring-outer"></div>
       <div class="orb-ring-inner"></div>
-      <div class="orb-core"></div>
-      <div class="orb-spark"></div>
-      <div class="orb-spark s2"></div>
+      <div class="orb-core">
+        <span class="orb-core-icon">${Icons.search(iconSize)}</span>
+      </div>
     </div>`;
   }
 

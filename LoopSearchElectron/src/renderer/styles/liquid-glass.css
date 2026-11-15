@@ -150,15 +150,10 @@ html, body {
   background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.56) 28%, rgba(186, 230, 253, 0.92) 50%, rgba(255, 255, 255, 0.56) 72%, transparent 100%);
   pointer-events: none;
   z-index: 6;
-  animation: rimPulse 4.6s ease-in-out infinite;
+  opacity: 0.9;
 }
 
-@keyframes rimPulse {
-  0%, 100% { opacity: 0.78; transform: scaleX(0.98); }
-  50% { opacity: 1; transform: scaleX(1.02); }
-}
-
-/* Living Horizon Aurora Wave at bottom of every Liquid Glass dialog */
+/* Living Horizon Aurora Wave at bottom of every Liquid Glass dialog (GPU-light layered radial gradient) */
 .horizon-well {
   position: absolute;
   inset: 0;
@@ -178,6 +173,7 @@ html, body {
   height: 185px;
   border-radius: 50%;
   pointer-events: none;
+  transition: transform 0.35s ease;
 }
 
 .horizon-well::before {
@@ -187,32 +183,19 @@ html, body {
     var(--accent-glow-2) 44%,
     transparent 74%
   );
-  filter: blur(18px);
-  animation: horizonBreathe 5.2s ease-in-out infinite;
+  opacity: 0.92;
 }
 
 .horizon-well::after {
   bottom: -56px;
   height: 120px;
   background: radial-gradient(
-    ellipse at 50% 100%,
-    rgba(224, 242, 254, 0.34) 0%,
-    var(--accent-glow-1) 42%,
+    ellipse at calc(var(--horizon-x, 50%) + 0%) 100%,
+    rgba(224, 242, 254, 0.28) 0%,
+    var(--accent-glow-1) 40%,
     transparent 72%
   );
-  filter: blur(10px);
-  animation: horizonWaveDrift 6.8s ease-in-out infinite alternate;
-}
-
-@keyframes horizonBreathe {
-  0%, 100% { transform: translateX(-3%) scaleY(0.94); opacity: 0.85; }
-  50% { transform: translateX(3%) scaleY(1.12); opacity: 1; }
-}
-
-@keyframes horizonWaveDrift {
-  0% { transform: translateX(5%) scaleX(0.92); opacity: 0.65; }
-  50% { transform: translateX(-4%) scaleX(1.08); opacity: 0.98; }
-  100% { transform: translateX(3%) scaleX(0.96); opacity: 0.72; }
+  opacity: 0.78;
 }
 
 .dialog-stars {
@@ -269,12 +252,11 @@ a {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  animation: badgeFloat 4.8s ease-in-out infinite;
+  transition: transform 0.28s var(--spring-snappy);
 }
 
-@keyframes badgeFloat {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-2px); }
+.brand-badge:hover {
+  transform: scale(1.05);
 }
 
 .title-main {
@@ -850,11 +832,11 @@ a {
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.20);
 }
 
-/* Multi-ring Animated Optical Blue Search Orb matching macOS BlueSearchOpticalOrbView */
+/* Animated Optical Blue Search Orb matching macOS BlueSearchOpticalOrbView (obsidian core + crisp white magnifier + spinning comet ring) */
 .optical-orb {
   position: relative;
-  width: 68px;
-  height: 68px;
+  width: 76px;
+  height: 76px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -867,96 +849,110 @@ a {
 
 .orb-halo {
   position: absolute;
-  inset: -12px;
+  inset: 0;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(56, 189, 248, 0.42), rgba(37, 99, 235, 0.14) 55%, transparent 72%);
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.24) 0%, rgba(37, 99, 235, 0.10) 56%, transparent 74%);
+  border: 1px solid rgba(56, 189, 248, 0.16);
   animation: orbPulse 2.1s ease-in-out infinite;
 }
 
 .orb-ripple {
   position: absolute;
-  inset: 4px;
+  inset: 8px;
   border-radius: 999px;
-  border: 1.5px solid rgba(125, 211, 252, 0.62);
+  border: 1px solid rgba(125, 211, 252, 0.42);
   animation: orbSonar 2.2s cubic-bezier(0.12, 0.72, 0.26, 1) infinite;
 }
 
 .orb-ripple.r2 {
-  animation-delay: 0.73s;
-}
-
-.orb-ripple.r3 {
-  animation-delay: 1.46s;
+  animation-delay: 1.1s;
 }
 
 .orb-ring-outer {
   position: absolute;
-  inset: 2px;
+  inset: 9px;
   border-radius: 999px;
-  padding: 2.5px;
-  background: conic-gradient(from 0deg, #38bdf8, #818cf8, #e0f2fe, #2563eb, #38bdf8);
+  padding: 2px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(37, 99, 235, 0.35) 140deg,
+    #38bdf8 280deg,
+    #e0f2fe 340deg,
+    #ffffff 360deg
+  );
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: spinCW 2.1s linear infinite;
+  animation: spinCW 1.7s linear infinite;
 }
 
 .orb-ring-inner {
   position: absolute;
-  inset: 9px;
+  inset: 13px;
   border-radius: 999px;
-  padding: 2px;
-  background: conic-gradient(from 180deg, rgba(165, 243, 252, 0.92), transparent 55%, rgba(56, 189, 248, 0.85));
+  padding: 1.25px;
+  background: conic-gradient(
+    from 180deg,
+    rgba(125, 211, 252, 0.55) 0deg,
+    transparent 45%,
+    rgba(56, 189, 248, 0.45) 85%,
+    transparent 100%
+  );
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: spinCCW 1.45s linear infinite;
+  animation: spinCCW 2.4s linear infinite;
 }
 
 .orb-core {
-  width: 24px;
-  height: 24px;
+  position: relative;
+  z-index: 2;
+  width: 44px;
+  height: 44px;
   border-radius: 999px;
-  background: radial-gradient(circle at 35% 35%, #e0f2fe 0%, #38bdf8 48%, #1d4ed8 100%);
-  box-shadow: 0 0 18px rgba(56, 189, 248, 0.72);
+  background: radial-gradient(circle at 34% 28%, #0f1f42 0%, #060d20 56%, #040816 100%);
+  border: 1.2px solid rgba(61, 189, 255, 0.76);
+  box-shadow:
+    0 0 16px rgba(56, 189, 248, 0.34),
+    inset 0 1px 0 rgba(186, 230, 253, 0.26);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #f8fafc;
   animation: orbCoreBeat 1.8s ease-in-out infinite;
 }
 
+.orb-core-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  filter: drop-shadow(0 0 6px rgba(125, 211, 252, 0.55));
+}
+
+.optical-orb.compact .orb-halo { inset: -2px; }
+.optical-orb.compact .orb-ripple { inset: 4px; }
+.optical-orb.compact .orb-ring-outer { inset: 4px; padding: 1.8px; }
+.optical-orb.compact .orb-ring-inner { inset: 8px; }
 .optical-orb.compact .orb-core {
-  width: 18px;
-  height: 18px;
-}
-
-.orb-spark {
-  position: absolute;
-  width: 5px;
-  height: 5px;
-  background: #e0f2fe;
-  clip-path: polygon(50% 0%, 64% 36%, 100% 50%, 64% 64%, 50% 100%, 36% 64%, 0% 50%, 36% 36%);
-  animation: orbSparkOrbit 3.4s linear infinite;
-}
-
-.orb-spark.s2 {
-  width: 4px;
-  height: 4px;
-  background: #7dd3fc;
-  animation-duration: 2.6s;
-  animation-direction: reverse;
+  width: 28px;
+  height: 28px;
 }
 
 @keyframes orbPulse {
-  0%, 100% { transform: scale(0.92); opacity: 0.72; }
-  50% { transform: scale(1.12); opacity: 1; }
+  0%, 100% { transform: scale(0.95); opacity: 0.68; }
+  50% { transform: scale(1.08); opacity: 0.95; }
 }
 
 @keyframes orbSonar {
-  0% { transform: scale(0.76); opacity: 0.78; }
-  100% { transform: scale(1.78); opacity: 0; }
+  0% { transform: scale(0.84); opacity: 0.58; }
+  100% { transform: scale(1.56); opacity: 0; }
 }
 
 @keyframes orbCoreBeat {
-  0%, 100% { transform: scale(0.94); }
-  50% { transform: scale(1.08); }
+  0%, 100% { transform: scale(0.98); }
+  50% { transform: scale(1.03); }
 }
 
 @keyframes spinCW {
@@ -967,12 +963,6 @@ a {
 @keyframes spinCCW {
   from { transform: rotate(360deg); }
   to { transform: rotate(0deg); }
-}
-
-@keyframes orbSparkOrbit {
-  from { transform: rotate(0deg) translateX(28px) scale(0.9); }
-  50% { transform: rotate(180deg) translateX(30px) scale(1.25); }
-  to { transform: rotate(360deg) translateX(28px) scale(0.9); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -987,8 +977,7 @@ a {
   .orb-ripple,
   .orb-ring-outer,
   .orb-ring-inner,
-  .orb-core,
-  .orb-spark {
+  .orb-core {
     animation: none !important;
     transition: none !important;
   }

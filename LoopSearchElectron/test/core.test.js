@@ -264,3 +264,64 @@ test('FirebaseAuthService loopback callback handles /oauth2/callback, favicon 20
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('FirebaseAuthService queues session_resume offline and flushes when network returns', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ls-resume-test-'));
+  try {
+    const store = new SettingsStore(tmpDir, 'test-resume-seed-789');
+    store.vault.set('firebaseSession', {
+      uid: 'uid-win-offline',
+      email: 'friend@example.com',
+      displayName: 'Friend',
+      photoURL: '',
+      idToken: '',
+      refreshToken: 'refresh-abc',
+      expiresAt: 0
+    });
+
+    let networkOnline = false;
+    const committedEvents = [];
+    const auth = new FirebaseAuthService({
+      vault: store.vault,
+      appVersion: '1.0.3',
+      telemetryDisabled: false,
+      openExternal: () => {}
+    });
+
+    auth.ensureFreshToken = async () => {
+      if (!networkOnline) throw new Error('ENOTFOUND securetoken.googleapis.com');
+      return 'fresh-token-123';
+    };
+    auth.refreshUserProfile = async () => {};
+    auth._commitEvent = async (meta) => {
+      if (!networkOnline) throw new Error('offline');
+      committedEvents.push(meta);
+    };
+
+    // Offline startup must STILL queue session_resume into pendingLoginEvents
+    await auth.restoreAndRecordResume();
+    const queued = store.vault.get('pendingLoginEvents', []);
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].eventType, 'session_resume');
+    assert.equal(committedEvents.length, 0);
+
+    // Once network recovers, recordResumeHeartbeat/flush commits it cleanly
+    networkOnline = true;
+    await auth.recordResumeHeartbeat({ minIntervalMs: 15 * 60 * 1000 });
+    assert.equal(committedEvents.length, 1);
+    assert.equal(committedEvents[0].eventType, 'session_resume');
+    assert.equal(store.vault.get('pendingLoginEvents', []).length, 0);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('Renderer parity: no orbiting perimeter dot, no canvas shadowBlur, and dark optical orb center icon', () => {
+  const overlayJs = fs.readFileSync(path.join(__dirname, '../src/renderer/js/overlay.js'), 'utf8');
+  const motionJs = fs.readFileSync(path.join(__dirname, '../src/renderer/js/motion-and-glass.js'), 'utf8');
+
+  assert.equal(overlayJs.includes('Flowing bright comet spark'), false);
+  assert.equal(overlayJs.includes('shadowBlur'), false);
+  assert.equal(motionJs.includes('shadowBlur'), false);
+  assert.equal(motionJs.includes('orb-core-icon'), true);
+});

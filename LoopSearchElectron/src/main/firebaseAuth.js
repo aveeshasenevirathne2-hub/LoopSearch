@@ -154,6 +154,8 @@ class FirebaseAuthService {
     this._activeServer = null;
     this._session = this.vault.get('firebaseSession', null);
     this._onChangeListeners = new Set();
+    this._lastResumeRecordedAt = 0;
+    this._resumeInFlight = null;
   }
 
   onChange(fn) {
@@ -194,19 +196,44 @@ class FirebaseAuthService {
   }
 
   async restoreAndRecordResume() {
+    return this.recordResumeHeartbeat({ minIntervalMs: 0, refreshProfile: true });
+  }
+
+  async recordResumeHeartbeat({ minIntervalMs = 15 * 60 * 1000, refreshProfile = false } = {}) {
     if (!this._session || !this._session.refreshToken) {
       return this.getPublicState();
     }
-    try {
-      await this.ensureFreshToken();
-      await this.refreshUserProfile();
-      await this._recordEventWithFallback('session_resume');
-      await this.flushPendingEvents();
-    } catch {
-      // Keep local cached session alive cleanly; offline queue preserves telemetry
+    if (this._resumeInFlight) {
+      return this._resumeInFlight;
     }
-    this._notify();
-    return this.getPublicState();
+
+    this._resumeInFlight = (async () => {
+      try {
+        try {
+          await this.ensureFreshToken();
+          if (refreshProfile) {
+            await this.refreshUserProfile();
+          }
+        } catch {
+          // Offline / cold-boot network error: keep local session alive and still queue/flush telemetry below
+        }
+
+        const elapsed = Date.now() - (this._lastResumeRecordedAt || 0);
+        if (this._lastResumeRecordedAt === 0 || elapsed >= minIntervalMs) {
+          this._lastResumeRecordedAt = Date.now();
+          await this._recordEventWithFallback('session_resume');
+        }
+        await this.flushPendingEvents();
+      } catch {
+        // Offline queue preserves telemetry safely
+      } finally {
+        this._resumeInFlight = null;
+      }
+      this._notify();
+      return this.getPublicState();
+    })();
+
+    return this._resumeInFlight;
   }
 
   async signOut() {
@@ -301,6 +328,7 @@ class FirebaseAuthService {
             }
             this._session = session;
             this.vault.set('firebaseSession', session);
+            this._lastResumeRecordedAt = Date.now();
             await this._recordEventWithFallback('interactive_sign_in');
             await this.flushPendingEvents();
             this._notify();
@@ -486,37 +514,48 @@ class FirebaseAuthService {
     this.vault.set('pendingLoginEvents', remaining);
   }
 
-  async _commitEvent(eventMeta) {
-    const idToken = await this.ensureFreshToken();
+  async _commitEvent(eventMeta, allowTokenRetry = true) {
     const endpoint = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/${FIREBASE_CONFIG.databaseId}/documents:commit`;
+    const isMissingDoc = (status, text) =>
+      status === 404 ||
+      text.includes('NOT_FOUND') ||
+      text.includes('FAILED_PRECONDITION') ||
+      text.includes('no entity to update') ||
+      text.includes('stored version');
 
-    const doCommit = async (userExists) => {
-      const body = buildFirestoreCommitWrites({
-        session: this._session,
-        ...eventMeta,
-        userExists
-      });
-      return fetch(endpoint, {
+    const doCommit = (userExists, token) =>
+      fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`
+          Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(
+          buildFirestoreCommitWrites({
+            session: this._session,
+            ...eventMeta,
+            userExists
+          })
+        )
       });
-    };
 
-    let resp = await doCommit(true);
+    let token = await this.ensureFreshToken();
+    let resp = await doCommit(true, token);
+    if (resp.status === 401 && allowTokenRetry) {
+      this._session = { ...this._session, expiresAt: 0 };
+      token = await this.ensureFreshToken();
+      resp = await doCommit(true, token);
+    }
+    if (resp.ok) return;
+
+    const errText = await resp.text();
+    if (!isMissingDoc(resp.status, errText)) {
+      throw new Error(`Firestore update commit failed (${resp.status}): ${errText}`);
+    }
+
+    resp = await doCommit(false, token);
     if (!resp.ok) {
-      const text = await resp.text();
-      if (resp.status === 404 || text.includes('NOT_FOUND') || text.includes('no entity to update')) {
-        resp = await doCommit(false);
-        if (!resp.ok) {
-          throw new Error(`Firestore create commit failed (${resp.status}): ${await resp.text()}`);
-        }
-        return;
-      }
-      throw new Error(`Firestore update commit failed (${resp.status}): ${text}`);
+      throw new Error(`Firestore create commit failed (${resp.status}): ${await resp.text()}`);
     }
   }
 }
