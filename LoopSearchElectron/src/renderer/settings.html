@@ -1,0 +1,453 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>LoopSearch Studio</title>
+  <link rel="stylesheet" href="./styles/liquid-glass.css" />
+  <style>
+    .studio-preview {
+      border-radius: 14px;
+      padding: 14px;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      background:
+        radial-gradient(ellipse at 50% 110%, var(--accent-glow-1), transparent 72%),
+        rgba(8, 13, 28, 0.72);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .swatch-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+    .field-label {
+      font-size: 11.8px;
+      font-weight: 650;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+    .key-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="dialog-backdrop">
+    <div class="glass-shell" id="glass-shell">
+      <div class="top-specular-rim"></div>
+      <div class="horizon-well"></div>
+      <canvas class="dialog-stars" id="stars-canvas"></canvas>
+
+      <div class="shell-inner">
+        <div class="drag-header">
+          <div class="brand-row">
+            <div class="brand-badge" id="brand-icon"></div>
+            <div>
+              <h1 class="title-main">LoopSearch Studio</h1>
+              <p class="title-sub" id="version-sub">Personalize Liquid Glass, hotkeys &amp; AI</p>
+            </div>
+          </div>
+          <div class="no-drag" style="display:flex;align-items:center;gap:8px;">
+            <button class="btn-glass" id="test-overlay-btn" style="padding:6px 12px;font-size:11.5px;">Launch Search</button>
+            <button class="icon-circle-btn" id="close-btn" title="Close"></button>
+          </div>
+        </div>
+
+        <div class="segmented no-drag" id="tabs">
+          <button data-tab="general" class="active">General</button>
+          <button data-tab="appearance">Liquid Glass</button>
+          <button data-tab="ai">AI &amp; Account</button>
+        </div>
+
+        <div class="scroll-body">
+          <!-- TAB: GENERAL -->
+          <div id="tab-general" class="tab-panel" style="display:flex;flex-direction:column;gap:10px;">
+            <div class="glass-card">
+              <div class="field-label">Global Trigger Shortcut</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                <span class="kbd-cap" id="current-hotkey-cap" style="font-size:13px;padding:6px 12px;">Ctrl + Shift + Space</span>
+                <button class="btn-glass" id="record-hotkey-btn">Record Shortcut</button>
+              </div>
+              <div class="chip-row" id="studio-hotkey-presets"></div>
+            </div>
+
+            <div class="glass-card">
+              <div class="field-label">Default Selection Mode</div>
+              <div class="chip-row" id="mode-chips"></div>
+            </div>
+
+            <div class="glass-card">
+              <div class="field-label">Text &amp; Follow-Up Engine</div>
+              <div class="chip-row" id="engine-chips"></div>
+            </div>
+
+            <div class="glass-card">
+              <div class="toggle-row">
+                <div>
+                  <div class="toggle-label">Launch at Windows Login</div>
+                  <div class="toggle-hint">Start silently in the System Tray when PC boots</div>
+                </div>
+                <div class="switch" id="sw-launch"></div>
+              </div>
+              <div class="toggle-row" style="border-top:1px solid var(--border-subtle);padding-top:9px;margin-top:4px;">
+                <div>
+                  <div class="toggle-label">Auto-Copy Recognized Text</div>
+                  <div class="toggle-hint">Copy OCR text immediately after capture completes</div>
+                </div>
+                <div class="switch" id="sw-autocr"></div>
+              </div>
+              <div class="toggle-row" style="border-top:1px solid var(--border-subtle);padding-top:9px;margin-top:4px;">
+                <div>
+                  <div class="toggle-label">Open Results in Default Browser</div>
+                  <div class="toggle-hint">Skip embedded sheet and launch external browser</div>
+                </div>
+                <div class="switch" id="sw-extfallback"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB: APPEARANCE -->
+          <div id="tab-appearance" class="tab-panel" style="display:none;flex-direction:column;gap:10px;">
+            <div class="studio-preview">
+              <div>
+                <div style="font-size:13.5px;font-weight:700;color:#fff;">Horizon Liquid Glass</div>
+                <div style="font-size:11.5px;color:rgba(226,232,240,0.75);margin-top:2px;">Live surface depth, aura palette &amp; motion curves</div>
+              </div>
+              <div id="preview-orb-slot"></div>
+            </div>
+
+            <div class="glass-card">
+              <div class="field-label">Window Theme</div>
+              <div class="chip-row" id="theme-chips"></div>
+            </div>
+
+            <div class="glass-card">
+              <div class="field-label">Visual Style Preset</div>
+              <div class="chip-row" id="style-chips"></div>
+            </div>
+
+            <div class="glass-card">
+              <div class="field-label">Glow Palette</div>
+              <div class="chip-row" id="glow-chips"></div>
+            </div>
+
+            <div class="glass-card" style="display:flex;gap:14px;">
+              <div style="flex:1;">
+                <div class="field-label">Glow Intensity</div>
+                <div class="chip-row" id="intensity-chips"></div>
+              </div>
+              <div style="flex:1;">
+                <div class="field-label">Motion Feel</div>
+                <div class="chip-row" id="motion-chips"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB: AI & ACCOUNT -->
+          <div id="tab-ai" class="tab-panel" style="display:none;flex-direction:column;gap:10px;">
+            <div class="glass-card">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div class="field-label" style="margin:0;">Gemini 2.5 Flash Vision Key</div>
+                <span class="pill-badge" id="gemini-status-pill">Not Configured</span>
+              </div>
+              <p class="step-desc" style="margin-top:6px;">
+                Encrypted locally with AES-256-GCM. Enables instant in-overlay ✨ Explain &amp; smart Q&amp;A answers.
+              </p>
+              <div class="key-row">
+                <input type="password" class="text-input" id="gemini-key-input" placeholder="Paste Gemini API key (AIza...)" />
+                <button class="btn-primary" id="save-gemini-btn" style="padding:7px 14px;">Save</button>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+                <button class="chip-btn" id="get-gemini-key-btn">Get Free API Key</button>
+                <button class="chip-btn" id="clear-gemini-btn">Remove Key</button>
+              </div>
+            </div>
+
+            <div class="glass-card">
+              <div class="field-label">Google Account</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                <div>
+                  <div style="font-size:13px;font-weight:650;" id="studio-account-name">Not signed in</div>
+                  <div style="font-size:11.5px;color:var(--text-secondary);" id="studio-account-email">Sign in to sync your LoopSearch profile</div>
+                </div>
+                <button class="btn-glass" id="studio-auth-btn">Sign In</button>
+              </div>
+            </div>
+
+            <div class="glass-card" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+              <div>
+                <div style="font-size:13px;font-weight:650;">App Updates &amp; Data</div>
+                <div style="font-size:11.5px;color:var(--text-secondary);" id="update-status-text">Version 1.0.3</div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button class="chip-btn" id="check-updates-btn">Check Updates</button>
+                <button class="chip-btn" id="clear-history-btn">Clear History</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./js/motion-and-glass.js"></script>
+  <script>
+    (function () {
+      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars, renderOpticalOrbHtml } = window.LoopUI;
+      document.getElementById('brand-icon').innerHTML = Icons.brandMark(24);
+      document.getElementById('close-btn').innerHTML = Icons.close(13);
+      document.getElementById('preview-orb-slot').innerHTML = renderOpticalOrbHtml(true);
+      initHorizonLightWell(document.getElementById('glass-shell'));
+      initDialogStars(document.getElementById('stars-canvas'), 16);
+
+      let settings = null;
+      let auth = null;
+      let presets = [];
+      let recordingHotkey = false;
+
+      // Tabs
+      document.querySelectorAll('#tabs button').forEach((btn) => {
+        btn.onclick = () => {
+          document.querySelectorAll('#tabs button').forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          const tab = btn.dataset.tab;
+          document.querySelectorAll('.tab-panel').forEach((p) => {
+            p.style.display = p.id === `tab-${tab}` ? 'flex' : 'none';
+          });
+        };
+      });
+
+      function renderChipGroup(containerId, items, currentVal, onSelect, withDot = false) {
+        const el = document.getElementById(containerId);
+        el.innerHTML = '';
+        for (const item of items) {
+          const btn = document.createElement('button');
+          btn.className = 'chip-btn' + (item.id === currentVal ? ' active' : '');
+          if (withDot && item.color) {
+            btn.innerHTML = `<span class="swatch-dot" style="background:${item.color}"></span><span>${item.label}</span>`;
+          } else {
+            btn.textContent = item.label;
+          }
+          btn.onclick = () => onSelect(item.id);
+          el.appendChild(btn);
+        }
+      }
+
+      function renderAll(s, a) {
+        if (s) {
+          settings = s;
+          applyGlassAppearance(s);
+          document.getElementById('version-sub').textContent = `LoopSearch v${s.appVersion} • ${s.osVersion}`;
+          document.getElementById('update-status-text').textContent = `LoopSearch v${s.appVersion} (${s.osVersion})`;
+          if (!recordingHotkey) {
+            document.getElementById('current-hotkey-cap').textContent = s.hotkeyDisplay;
+          }
+
+          renderChipGroup('studio-hotkey-presets', presets, s.hotkey, (id) =>
+            window.loopSearch.updateSettings({ hotkey: id })
+          );
+          renderChipGroup(
+            'mode-chips',
+            [
+              { id: 'box', label: '1 Box' },
+              { id: 'freehand', label: '2 Freehand Loop' },
+              { id: 'tap', label: '3 Smart Tap' },
+              { id: 'text', label: '4 OCR Text' }
+            ],
+            s.defaultMode,
+            (id) => window.loopSearch.updateSettings({ defaultMode: id })
+          );
+          renderChipGroup(
+            'engine-chips',
+            [
+              { id: 'googleLens', label: 'Google Lens' },
+              { id: 'perplexity', label: 'Perplexity' },
+              { id: 'bing', label: 'Bing Search' },
+              { id: 'aiExplain', label: 'Google AI Mode' }
+            ],
+            s.searchEngine,
+            (id) => window.loopSearch.updateSettings({ searchEngine: id })
+          );
+          renderChipGroup(
+            'theme-chips',
+            [
+              { id: 'dark', label: 'Obsidian Dark' },
+              { id: 'light', label: 'Pearl Light' },
+              { id: 'system', label: 'Match Windows' }
+            ],
+            s.theme,
+            (id) => window.loopSearch.updateSettings({ theme: id })
+          );
+          renderChipGroup(
+            'style-chips',
+            [
+              { id: 'crystal', label: 'Crystal' },
+              { id: 'aurora', label: 'Aurora' },
+              { id: 'minimal', label: 'Minimal' },
+              { id: 'stealth', label: 'Stealth' }
+            ],
+            s.visualStylePreset,
+            (id) => window.loopSearch.updateSettings({ visualStylePreset: id })
+          );
+          renderChipGroup(
+            'glow-chips',
+            [
+              { id: 'apple', label: 'Apple Blue', color: '#38bdf8' },
+              { id: 'arctic', label: 'Arctic Cyan', color: '#22d3ee' },
+              { id: 'violet', label: 'Violet Pulse', color: '#a78bfa' },
+              { id: 'ember', label: 'Solar Ember', color: '#fb923c' }
+            ],
+            s.glowTheme,
+            (id) => window.loopSearch.updateSettings({ glowTheme: id }),
+            true
+          );
+          renderChipGroup(
+            'intensity-chips',
+            [
+              { id: 'subtle', label: 'Subtle' },
+              { id: 'balanced', label: 'Balanced' },
+              { id: 'vivid', label: 'Vivid' }
+            ],
+            s.glowIntensity,
+            (id) => window.loopSearch.updateSettings({ glowIntensity: id })
+          );
+          renderChipGroup(
+            'motion-chips',
+            [
+              { id: 'crisp', label: 'Crisp' },
+              { id: 'lush', label: 'Lush' }
+            ],
+            s.motionFeel,
+            (id) => window.loopSearch.updateSettings({ motionFeel: id })
+          );
+
+          document.getElementById('sw-launch').classList.toggle('on', Boolean(s.launchAtLogin));
+          document.getElementById('sw-autocr').classList.toggle('on', Boolean(s.autoCopyOcrText));
+          document.getElementById('sw-extfallback').classList.toggle('on', Boolean(s.openInBrowserFallback));
+
+          const pill = document.getElementById('gemini-status-pill');
+          if (s.hasGeminiApiKey) {
+            pill.textContent = `Saved (${s.maskedGeminiApiKey})`;
+            pill.classList.add('success');
+          } else {
+            pill.textContent = 'Not Configured';
+            pill.classList.remove('success');
+          }
+        }
+
+        if (a) {
+          auth = a;
+          const nameEl = document.getElementById('studio-account-name');
+          const emailEl = document.getElementById('studio-account-email');
+          const authBtn = document.getElementById('studio-auth-btn');
+          if (a.signedIn) {
+            nameEl.textContent = a.displayName || 'LoopSearch User';
+            emailEl.textContent = a.email || 'Connected with Google';
+            authBtn.textContent = 'Sign Out';
+            authBtn.onclick = () => window.loopSearch.signOut();
+          } else {
+            nameEl.textContent = 'Not signed in';
+            emailEl.textContent = 'Sign in with Google to use Circle to Search';
+            authBtn.textContent = 'Sign In with Google';
+            authBtn.onclick = () => window.loopSearch.signInWithGoogle();
+          }
+        }
+      }
+
+      document.getElementById('sw-launch').onclick = () =>
+        settings && window.loopSearch.updateSettings({ launchAtLogin: !settings.launchAtLogin });
+      document.getElementById('sw-autocr').onclick = () =>
+        settings && window.loopSearch.updateSettings({ autoCopyOcrText: !settings.autoCopyOcrText });
+      document.getElementById('sw-extfallback').onclick = () =>
+        settings && window.loopSearch.updateSettings({ openInBrowserFallback: !settings.openInBrowserFallback });
+
+      const recBtn = document.getElementById('record-hotkey-btn');
+      recBtn.onclick = () => {
+        recordingHotkey = !recordingHotkey;
+        recBtn.textContent = recordingHotkey ? 'Press Keys...' : 'Record Shortcut';
+        document.getElementById('current-hotkey-cap').textContent = recordingHotkey
+          ? 'Press modifier + key...'
+          : settings.hotkeyDisplay;
+      };
+
+      window.addEventListener('keydown', async (e) => {
+        if (recordingHotkey) {
+          e.preventDefault();
+          if (e.key === 'Escape') {
+            recordingHotkey = false;
+            recBtn.textContent = 'Record Shortcut';
+            document.getElementById('current-hotkey-cap').textContent = settings.hotkeyDisplay;
+            return;
+          }
+          if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+          const parts = [];
+          if (e.ctrlKey) parts.push('Ctrl');
+          if (e.altKey) parts.push('Alt');
+          if (e.shiftKey) parts.push('Shift');
+          if (e.metaKey) parts.push('Super');
+          if (parts.length === 0) return;
+          const keyName = e.code === 'Space' ? 'Space' : e.key.length === 1 ? e.key.toUpperCase() : e.key;
+          parts.push(keyName);
+          recordingHotkey = false;
+          recBtn.textContent = 'Record Shortcut';
+          await window.loopSearch.updateSettings({ hotkey: parts.join('+') });
+          window.loopSearch.showToast(`Shortcut updated: ${parts.join(' + ')}`, 'success');
+          return;
+        }
+        if (e.key === 'Escape') window.loopSearch.closeWindow();
+      });
+
+      document.getElementById('save-gemini-btn').onclick = async () => {
+        const val = document.getElementById('gemini-key-input').value.trim();
+        if (!val) return;
+        await window.loopSearch.setGeminiApiKey(val);
+        document.getElementById('gemini-key-input').value = '';
+        window.loopSearch.showToast('Gemini API key encrypted & saved', 'success');
+      };
+      document.getElementById('clear-gemini-btn').onclick = async () => {
+        await window.loopSearch.setGeminiApiKey('');
+        window.loopSearch.showToast('Gemini API key removed', 'info');
+      };
+      document.getElementById('get-gemini-key-btn').onclick = () =>
+        settings && window.loopSearch.openExternal(settings.geminiKeyPortalUrl);
+      document.getElementById('clear-history-btn').onclick = async () => {
+        await window.loopSearch.clearHistory();
+        window.loopSearch.showToast('Capture history cleared', 'info');
+      };
+      document.getElementById('check-updates-btn').onclick = async () => {
+        const res = await window.loopSearch.checkForUpdates();
+        if (!res.ok) {
+          window.loopSearch.showToast(`Update check failed: ${res.error}`, 'error');
+        } else if (res.updateAvailable) {
+          document.getElementById('update-status-text').textContent = `Update available: v${res.latestVersion}!`;
+          window.loopSearch.openExternal(res.releaseUrl);
+        } else {
+          window.loopSearch.showToast(`LoopSearch v${res.currentVersion} is up to date`, 'success');
+        }
+      };
+
+      document.getElementById('test-overlay-btn').onclick = () => window.loopSearch.startOverlay();
+      document.getElementById('close-btn').onclick = () => window.loopSearch.closeWindow();
+
+      window.loopSearch.onSettingsChanged((s) => renderAll(s, null));
+      window.loopSearch.onAuthChanged((a) => renderAll(null, a));
+
+      Promise.all([
+        window.loopSearch.getSettings(),
+        window.loopSearch.getAuthState(),
+        window.loopSearch.getHotkeyPresets()
+      ]).then(([s, a, p]) => {
+        presets = p;
+        renderAll(s, a);
+      });
+    })();
+  </script>
+</body>
+</html>

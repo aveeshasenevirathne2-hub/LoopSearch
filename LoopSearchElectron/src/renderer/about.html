@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>About LoopSearch</title>
+  <link rel="stylesheet" href="./styles/liquid-glass.css" />
+  <style>
+    .about-center {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 8px;
+    }
+    .about-logo {
+      width: 66px;
+      height: 66px;
+      border-radius: 18px;
+      background: linear-gradient(145deg, #172554, #090d1a);
+      border: 1px solid rgba(56, 189, 248, 0.48);
+      box-shadow: 0 12px 32px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="dialog-backdrop">
+    <div class="glass-shell" id="glass-shell" style="border-radius:22px;">
+      <div class="top-specular-rim"></div>
+      <div class="horizon-well"></div>
+      <canvas class="dialog-stars" id="stars-canvas"></canvas>
+
+      <div class="shell-inner">
+        <div class="drag-header" style="justify-content:flex-end;padding-bottom:0;">
+          <button class="icon-circle-btn" id="close-btn" title="Close"></button>
+        </div>
+
+        <div class="about-center no-drag">
+          <div class="about-logo" id="about-logo"></div>
+          <h1 class="title-main" style="font-size:19px;">LoopSearch</h1>
+          <span class="pill-badge" id="ver-pill">v1.0.3 • Windows</span>
+          <p class="step-desc" style="max-width:290px;margin-top:4px;">
+            Circle, box, or tap anything on your screen to search with Google Lens, copy offline OCR text, or ask AI.
+          </p>
+          <div style="font-size:11.8px;color:var(--text-muted);margin-top:2px;">
+            Created by <strong style="color:var(--text-primary);">Aveesha Senevirathne</strong>
+          </div>
+          <div class="chip-row" style="justify-content:center;margin-top:10px;">
+            <button class="btn-glass" id="github-btn">GitHub</button>
+            <button class="btn-glass" id="x-btn">@AveeshaSen</button>
+            <button class="btn-glass" id="update-btn">Check Updates</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./js/motion-and-glass.js"></script>
+  <script>
+    (function () {
+      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars } = window.LoopUI;
+      document.getElementById('about-logo').innerHTML = Icons.brandMark(40);
+      document.getElementById('close-btn').innerHTML = Icons.close(13);
+      initHorizonLightWell(document.getElementById('glass-shell'));
+      initDialogStars(document.getElementById('stars-canvas'), 18);
+
+      let settings = null;
+      window.loopSearch.getSettings().then((s) => {
+        settings = s;
+        applyGlassAppearance(s);
+        document.getElementById('ver-pill').textContent = `v${s.appVersion} • ${s.osVersion}`;
+      });
+      window.loopSearch.onSettingsChanged(applyGlassAppearance);
+
+      document.getElementById('close-btn').onclick = () => window.loopSearch.closeWindow();
+      document.getElementById('github-btn').onclick = () =>
+        settings && window.loopSearch.openExternal(settings.githubRepoUrl);
+      document.getElementById('x-btn').onclick = () =>
+        settings && window.loopSearch.openExternal(settings.xProfileUrl);
+      document.getElementById('update-btn').onclick = async () => {
+        const res = await window.loopSearch.checkForUpdates();
+        if (res.ok && res.updateAvailable) window.loopSearch.openExternal(res.releaseUrl);
+        else if (res.ok) window.loopSearch.showToast(`You're on latest v${res.currentVersion}`, 'success');
+        else window.loopSearch.showToast(res.error || 'Update check failed', 'error');
+      };
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') window.loopSearch.closeWindow();
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,118 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>How to Use LoopSearch</title>
+  <link rel="stylesheet" href="./styles/liquid-glass.css" />
+  <style>
+    .mode-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .mode-tag {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+      background: rgba(56, 189, 248, 0.14); border: 1px solid rgba(56, 189, 248, 0.30); color: #7dd3fc;
+    }
+  </style>
+</head>
+<body>
+  <div class="dialog-backdrop">
+    <div class="glass-shell" id="glass-shell">
+      <div class="top-specular-rim"></div>
+      <div class="horizon-well"></div>
+      <canvas class="dialog-stars" id="stars-canvas"></canvas>
+
+      <div class="shell-inner">
+        <div class="drag-header">
+          <div class="brand-row">
+            <div class="brand-badge" id="brand-icon"></div>
+            <div>
+              <h1 class="title-main">How to Use LoopSearch</h1>
+              <p class="title-sub">Instant Circle to Search workflow on Windows</p>
+            </div>
+          </div>
+          <button class="icon-circle-btn" id="close-btn" title="Close"></button>
+        </div>
+
+        <div class="scroll-body">
+          <div class="glass-card step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <div class="step-title-row">
+                <span class="step-title">Freeze Your Screen Anywhere</span>
+                <span class="kbd-cap" id="hotkey-cap">Ctrl + Shift + Space</span>
+              </div>
+              <p class="step-desc">Press your global hotkey anytime or click the System Tray icon. Press <span class="kbd-cap">Esc</span> anytime to dismiss.</p>
+            </div>
+          </div>
+
+          <div class="glass-card step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <div class="step-title">Switch Between 4 Precision Modes</div>
+              <p class="step-desc">Press keys <span class="kbd-cap">1</span>–<span class="kbd-cap">4</span> or click modes in the bottom glass capsule:</p>
+              <div class="mode-pills">
+                <span class="mode-tag">1 • Box Crop</span>
+                <span class="mode-tag">2 • Freehand Loop</span>
+                <span class="mode-tag">3 • Smart Tap</span>
+                <span class="mode-tag">4 • Live OCR Text</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="glass-card step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <div class="step-title">Smart Action Chips &amp; Offline Utilities</div>
+              <p class="step-desc">LoopSearch automatically detects URLs, QR codes, solves math expressions, picks dominant <span class="kbd-cap">#HEX</span> colors, runs offline Windows OCR, and answers with Gemini AI.</p>
+            </div>
+          </div>
+
+          <div class="glass-card step-card">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <div class="step-title">Pin Notes, Resize Sheet &amp; Dark Web</div>
+              <p class="step-desc">Drag the Results header anywhere, resize edges, press <span class="kbd-cap">P</span> to pin a floating note above apps, or <span class="kbd-cap">S</span> to save PNG.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer-bar no-drag">
+          <button class="btn-glass" id="open-settings-btn">Open Studio</button>
+          <button class="btn-primary" id="try-search-btn">
+            <span id="spark-icon"></span>
+            <span>Try Circle to Search</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./js/motion-and-glass.js"></script>
+  <script>
+    (function () {
+      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars } = window.LoopUI;
+      document.getElementById('brand-icon').innerHTML = Icons.brandMark(24);
+      document.getElementById('close-btn').innerHTML = Icons.close(13);
+      document.getElementById('spark-icon').innerHTML = Icons.sparkle(14);
+      initHorizonLightWell(document.getElementById('glass-shell'));
+      initDialogStars(document.getElementById('stars-canvas'), 16);
+
+      function apply(s) {
+        applyGlassAppearance(s);
+        document.getElementById('hotkey-cap').textContent = s.hotkeyDisplay;
+      }
+      window.loopSearch.getSettings().then(apply);
+      window.loopSearch.onSettingsChanged(apply);
+
+      document.getElementById('close-btn').onclick = () => window.loopSearch.closeWindow();
+      document.getElementById('open-settings-btn').onclick = () => window.loopSearch.openWindow('settings');
+      document.getElementById('try-search-btn').onclick = () => {
+        window.loopSearch.closeWindow();
+        setTimeout(() => window.loopSearch.startOverlay(), 140);
+      };
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') window.loopSearch.closeWindow();
+      });
+    })();
+  </script>
+</body>
+</html>

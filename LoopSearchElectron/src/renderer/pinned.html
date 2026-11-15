@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Pinned Capture</title>
+  <link rel="stylesheet" href="./styles/liquid-glass.css" />
+  <style>
+    .pin-frame {
+      width: 100%;
+      height: 100%;
+      padding: 6px;
+    }
+    .pin-card {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      border-radius: 16px;
+      overflow: hidden;
+      background: #0a0f1d;
+      border: 1px solid rgba(125, 211, 252, 0.35);
+      box-shadow: 0 14px 34px rgba(0, 0, 0, 0.52);
+      -webkit-app-region: drag;
+    }
+    .pin-card img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    .pin-actions {
+      -webkit-app-region: no-drag;
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: flex;
+      gap: 6px;
+      opacity: 0;
+      transition: opacity 0.18s ease;
+    }
+    .pin-card:hover .pin-actions {
+      opacity: 1;
+    }
+    .pin-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      background: rgba(8, 12, 24, 0.78);
+      backdrop-filter: blur(10px);
+      color: #f8fafc;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .pin-btn:hover { background: rgba(37, 99, 235, 0.85); }
+  </style>
+</head>
+<body>
+  <div class="pin-frame">
+    <div class="pin-card">
+      <div class="top-specular-rim" style="left:12px;right:12px;"></div>
+      <img id="pinned-img" alt="Pinned capture" />
+      <div class="pin-actions">
+        <button class="pin-btn" id="copy-btn" title="Copy Image"></button>
+        <button class="pin-btn" id="close-btn" title="Close"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./js/motion-and-glass.js"></script>
+  <script>
+    (function () {
+      const { Icons, applyGlassAppearance } = window.LoopUI;
+      document.getElementById('copy-btn').innerHTML = Icons.copy(12);
+      document.getElementById('close-btn').innerHTML = Icons.close(12);
+
+      let dataUrl = '';
+      window.loopSearch.onPinnedInit(({ imageDataUrl, settings }) => {
+        if (settings) applyGlassAppearance(settings);
+        dataUrl = imageDataUrl || '';
+        document.getElementById('pinned-img').src = dataUrl;
+      });
+
+      document.getElementById('copy-btn').onclick = async () => {
+        if (!dataUrl) return;
+        await window.loopSearch.copyImageDataUrl(dataUrl);
+        window.loopSearch.showToast('Pinned image copied', 'success');
+      };
+      document.getElementById('close-btn').onclick = () => window.loopSearch.closeWindow();
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') window.loopSearch.closeWindow();
+      });
+    })();
+  </script>
+</body>
+</html>

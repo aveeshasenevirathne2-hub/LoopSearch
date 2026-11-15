@@ -1,0 +1,139 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Rate &amp; Suggest Feature</title>
+  <link rel="stylesheet" href="./styles/liquid-glass.css" />
+  <style>
+    .stars-row {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin: 6px 0 4px;
+    }
+    .star-btn {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      color: rgba(148, 163, 184, 0.45);
+      padding: 4px;
+      transition: transform 0.22s var(--spring-snappy), color 0.16s ease;
+    }
+    .star-btn.lit {
+      color: #facc15;
+      filter: drop-shadow(0 0 8px rgba(250, 204, 21, 0.45));
+    }
+    .star-btn:hover { transform: scale(1.18); }
+  </style>
+</head>
+<body>
+  <div class="dialog-backdrop">
+    <div class="glass-shell" id="glass-shell" style="border-radius:22px;">
+      <div class="top-specular-rim"></div>
+      <div class="horizon-well"></div>
+      <canvas class="dialog-stars" id="stars-canvas"></canvas>
+
+      <div class="shell-inner">
+        <div class="drag-header">
+          <div class="brand-row">
+            <div class="brand-badge" id="brand-icon"></div>
+            <div>
+              <h1 class="title-main">Rate &amp; Suggest Feature</h1>
+              <p class="title-sub">Help make LoopSearch even better on Windows</p>
+            </div>
+          </div>
+          <button class="icon-circle-btn" id="close-btn" title="Close"></button>
+        </div>
+
+        <div class="scroll-body no-drag">
+          <div class="glass-card" style="text-align:center;">
+            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);">How is your experience so far?</div>
+            <div class="stars-row" id="stars-row"></div>
+          </div>
+
+          <div class="glass-card">
+            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Category</div>
+            <div class="chip-row" id="cat-row" style="margin-top:0;"></div>
+          </div>
+
+          <div class="glass-card" style="flex:1;display:flex;flex-direction:column;">
+            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Your Notes or Bug Details</div>
+            <textarea class="text-area" id="notes-box" rows="3" style="resize:none;flex:1;" placeholder="Describe any UI polish, bug, or feature idea..."></textarea>
+          </div>
+        </div>
+
+        <div class="footer-bar no-drag">
+          <button class="btn-glass" id="later-btn">Maybe Later</button>
+          <button class="btn-primary" id="submit-btn">Send on GitHub</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./js/motion-and-glass.js"></script>
+  <script>
+    (function () {
+      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars } = window.LoopUI;
+      document.getElementById('brand-icon').innerHTML = Icons.brandMark(24);
+      document.getElementById('close-btn').innerHTML = Icons.close(13);
+      initHorizonLightWell(document.getElementById('glass-shell'));
+      initDialogStars(document.getElementById('stars-canvas'), 14);
+
+      let rating = 5;
+      let category = 'Feature Request';
+      const categories = ['Feature Request', 'Bug Report', 'UI / Animation', 'Praise'];
+
+      function renderStars() {
+        const row = document.getElementById('stars-row');
+        row.innerHTML = '';
+        for (let i = 1; i <= 5; i++) {
+          const btn = document.createElement('button');
+          btn.className = 'star-btn' + (i <= rating ? ' lit' : '');
+          btn.innerHTML = Icons.star(24, i <= rating);
+          btn.onclick = () => {
+            rating = i;
+            renderStars();
+          };
+          row.appendChild(btn);
+        }
+      }
+
+      function renderCategories() {
+        const row = document.getElementById('cat-row');
+        row.innerHTML = '';
+        for (const cat of categories) {
+          const btn = document.createElement('button');
+          btn.className = 'chip-btn' + (cat === category ? ' active' : '');
+          btn.textContent = cat;
+          btn.onclick = () => {
+            category = cat;
+            renderCategories();
+          };
+          row.appendChild(btn);
+        }
+      }
+
+      window.loopSearch.getSettings().then(applyGlassAppearance);
+      window.loopSearch.onSettingsChanged(applyGlassAppearance);
+
+      document.getElementById('close-btn').onclick = () => window.loopSearch.closeWindow();
+      document.getElementById('later-btn').onclick = async () => {
+        await window.loopSearch.updateSettings({ feedbackPromptDismissed: true });
+        window.loopSearch.closeWindow();
+      };
+      document.getElementById('submit-btn').onclick = async () => {
+        const notes = document.getElementById('notes-box').value.trim();
+        await window.loopSearch.openFeedbackIssue({ rating, category, notes });
+        await window.loopSearch.updateSettings({ feedbackPromptDismissed: true });
+        window.loopSearch.closeWindow();
+      };
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') window.loopSearch.closeWindow();
+      });
+
+      renderStars();
+      renderCategories();
+    })();
+  </script>
+</body>
+</html>

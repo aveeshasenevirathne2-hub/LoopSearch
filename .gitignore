@@ -17,5 +17,7 @@ LoopSearchWindows/**/obj/
 LoopSearchWindows/**/publish/
 LoopSearchWindows.Tests/**/bin/
 LoopSearchWindows.Tests/**/obj/
+LoopSearchElectron/node_modules/
+LoopSearchElectron/dist/
 *.exe
 *.pdb

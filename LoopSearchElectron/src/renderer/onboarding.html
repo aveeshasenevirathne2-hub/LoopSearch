@@ -1,0 +1,286 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Welcome to LoopSearch</title>
+  <link rel="stylesheet" href="./styles/liquid-glass.css" />
+  <style>
+    .hero-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.14);
+      border: 1px solid rgba(56, 189, 248, 0.32);
+      color: #7dd3fc;
+    }
+    .google-btn {
+      margin-top: 8px;
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-primary);
+      padding: 8px 12px;
+      font-family: var(--font-sans);
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s var(--spring-snappy);
+    }
+    .google-btn:hover {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: rgba(56, 189, 248, 0.5);
+    }
+    .creator-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 14px;
+    }
+    .mini-link {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--accent-primary);
+      background: rgba(56, 189, 248, 0.10);
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      border-radius: 999px;
+      padding: 4px 10px;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .mini-link:hover {
+      background: rgba(56, 189, 248, 0.20);
+    }
+  </style>
+</head>
+<body>
+  <div class="dialog-backdrop">
+    <div class="glass-shell" id="glass-shell">
+      <div class="top-specular-rim"></div>
+      <div class="horizon-well"></div>
+      <canvas class="dialog-stars" id="stars-canvas"></canvas>
+
+      <div class="shell-inner">
+        <div class="drag-header">
+          <div class="brand-row">
+            <div class="brand-badge" id="brand-icon"></div>
+            <div>
+              <h1 class="title-main">Welcome to LoopSearch</h1>
+              <p class="title-sub">Circle, box, or tap anything on screen without leaving your window</p>
+            </div>
+          </div>
+          <button class="icon-circle-btn" id="close-btn" title="Close"></button>
+        </div>
+
+        <div class="scroll-body">
+          <!-- Step 1 -->
+          <div class="glass-card step-card">
+            <div class="step-num">1</div>
+            <div class="step-body">
+              <div class="step-title-row">
+                <span class="step-title">Trigger LoopSearch Anywhere</span>
+                <span class="kbd-cap" id="hotkey-badge">Ctrl + Shift + Space</span>
+              </div>
+              <p class="step-desc">Press your global hotkey anytime or click the LoopSearch icon in the System Tray.</p>
+              <div class="chip-row" id="hotkey-presets"></div>
+            </div>
+          </div>
+
+          <!-- Step 2 -->
+          <div class="glass-card step-card">
+            <div class="step-num">2</div>
+            <div class="step-body">
+              <div class="step-title-row">
+                <span class="step-title">Instant Screen Freeze &amp; Offline OCR</span>
+                <span class="pill-badge success" id="capture-status-badge">Ready ✓</span>
+              </div>
+              <p class="step-desc">Captures crisp high-DPI frames across monitors with instant Windows OCR, QR &amp; color detection.</p>
+            </div>
+          </div>
+
+          <!-- Step 3 -->
+          <div class="glass-card step-card">
+            <div class="step-num">3</div>
+            <div class="step-body">
+              <div class="step-title-row">
+                <span class="step-title">4 Search Modes + AI &amp; Pinning</span>
+                <button class="mini-link no-drag" id="open-how-to-btn">How-To Guide</button>
+              </div>
+              <p class="step-desc">Switch between <b>1 Box</b>, <b>2 Freehand Loop</b>, <b>3 Tap</b>, or <b>4 OCR Text</b>, then explain with AI, translate, or pin floating notes.</p>
+            </div>
+          </div>
+
+          <!-- Step 4 -->
+          <div class="glass-card step-card">
+            <div class="step-num">4</div>
+            <div class="step-body">
+              <div class="step-title-row">
+                <span class="step-title">Sign In with Google</span>
+                <span class="pill-badge" id="auth-status-badge">Required to Search</span>
+              </div>
+              <p class="step-desc" id="auth-desc">Connect your Google account once to unlock overlay capture &amp; sync your session.</p>
+              <div id="auth-action-slot"></div>
+            </div>
+          </div>
+
+          <!-- Creator Card -->
+          <div class="glass-card creator-card">
+            <div>
+              <div style="font-size:12.5px;font-weight:650;">Built by Aveesha Senevirathne</div>
+              <div style="font-size:11.2px;color:var(--text-secondary);">Open-source Windows &amp; macOS Circle to Search</div>
+            </div>
+            <div style="display:flex;gap:6px;">
+              <button class="mini-link" id="open-studio-btn">Studio</button>
+              <button class="mini-link" id="open-github-btn">GitHub</button>
+              <button class="mini-link" id="open-x-btn">@AveeshaSen</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer-bar no-drag">
+          <div style="display:flex;align-items:center;gap:9px;cursor:pointer;" id="launch-toggle-wrap">
+            <div class="switch" id="launch-switch"></div>
+            <span style="font-size:12.5px;font-weight:560;">Launch at Login</span>
+          </div>
+          <button class="btn-primary" id="try-now-btn">
+            <span id="try-icon"></span>
+            <span id="try-label">Try LoopSearch Now</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./js/motion-and-glass.js"></script>
+  <script>
+    (function () {
+      const { Icons, applyGlassAppearance, initHorizonLightWell, initDialogStars } = window.LoopUI;
+      document.getElementById('brand-icon').innerHTML = Icons.brandMark(24);
+      document.getElementById('close-btn').innerHTML = Icons.close(13);
+      document.getElementById('try-icon').innerHTML = Icons.sparkle(14);
+      initHorizonLightWell(document.getElementById('glass-shell'));
+      initDialogStars(document.getElementById('stars-canvas'), 20);
+
+      let currentSettings = null;
+      let currentAuth = { signedIn: false };
+      let signingIn = false;
+
+      async function renderAll() {
+        const [settings, auth, presets] = await Promise.all([
+          window.loopSearch.getSettings(),
+          window.loopSearch.getAuthState(),
+          window.loopSearch.getHotkeyPresets()
+        ]);
+        currentSettings = settings;
+        currentAuth = auth;
+        updateUi(settings, auth, presets);
+      }
+
+      function updateUi(settings, auth, presets) {
+        if (settings) {
+          applyGlassAppearance(settings);
+          document.getElementById('hotkey-badge').textContent = settings.hotkeyDisplay;
+          document.getElementById('launch-switch').classList.toggle('on', Boolean(settings.launchAtLogin));
+          if (presets) {
+            const row = document.getElementById('hotkey-presets');
+            row.innerHTML = '';
+            for (const p of presets) {
+              const btn = document.createElement('button');
+              btn.className = 'chip-btn' + (settings.hotkey === p.id ? ' active' : '');
+              btn.textContent = p.label;
+              btn.onclick = () => window.loopSearch.updateSettings({ hotkey: p.id });
+              row.appendChild(btn);
+            }
+          }
+        }
+
+        const badge = document.getElementById('auth-status-badge');
+        const desc = document.getElementById('auth-desc');
+        const slot = document.getElementById('auth-action-slot');
+        const tryLabel = document.getElementById('try-label');
+
+        if (auth && auth.signedIn) {
+          badge.textContent = 'Connected ✓';
+          badge.classList.add('success');
+          desc.textContent = `Signed in as ${auth.displayName || auth.email} (${auth.email})`;
+          slot.innerHTML = '';
+          tryLabel.textContent = 'Try LoopSearch Now';
+        } else {
+          badge.textContent = 'Sign-In Required';
+          badge.classList.remove('success');
+          desc.textContent = 'Connect your Google account once to unlock overlay search & cloud sync.';
+          slot.innerHTML = `
+            <button class="google-btn" id="google-signin-btn">
+              ${Icons.googleG(15)}
+              <span>${signingIn ? 'Waiting for browser sign-in...' : 'Continue with Google'}</span>
+            </button>`;
+          document.getElementById('google-signin-btn').onclick = triggerSignIn;
+          tryLabel.textContent = 'Sign In & Start';
+        }
+      }
+
+      async function triggerSignIn() {
+        if (signingIn) return;
+        signingIn = true;
+        updateUi(currentSettings, currentAuth, null);
+        try {
+          const res = await window.loopSearch.signInWithGoogle();
+          if (res && res.ok) {
+            currentAuth = res.auth;
+          }
+        } finally {
+          signingIn = false;
+          renderAll();
+        }
+      }
+
+      document.getElementById('close-btn').onclick = () => window.loopSearch.closeWindow();
+      document.getElementById('open-how-to-btn').onclick = () => window.loopSearch.openWindow('howToUse');
+      document.getElementById('open-studio-btn').onclick = () => window.loopSearch.openWindow('settings');
+      document.getElementById('open-github-btn').onclick = () =>
+        currentSettings && window.loopSearch.openExternal(currentSettings.githubRepoUrl);
+      document.getElementById('open-x-btn').onclick = () =>
+        currentSettings && window.loopSearch.openExternal(currentSettings.xProfileUrl);
+
+      document.getElementById('launch-toggle-wrap').onclick = async () => {
+        if (!currentSettings) return;
+        await window.loopSearch.updateSettings({ launchAtLogin: !currentSettings.launchAtLogin });
+      };
+
+      document.getElementById('try-now-btn').onclick = async () => {
+        if (!currentAuth || !currentAuth.signedIn) {
+          await triggerSignIn();
+          return;
+        }
+        await window.loopSearch.updateSettings({ onboardingCompleted: true });
+        window.loopSearch.closeWindow();
+        setTimeout(() => window.loopSearch.startOverlay(), 140);
+      };
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') window.loopSearch.closeWindow();
+      });
+
+      window.loopSearch.onSettingsChanged((s) => {
+        currentSettings = s;
+        window.loopSearch.getHotkeyPresets().then((presets) => updateUi(s, currentAuth, presets));
+      });
+      window.loopSearch.onAuthChanged((a) => {
+        currentAuth = a;
+        updateUi(currentSettings, a, null);
+      });
+
+      renderAll();
+    })();
+  </script>
+</body>
+</html>

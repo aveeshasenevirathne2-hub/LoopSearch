@@ -1,0 +1,48 @@
+{
+  "name": "loopsearch-windows",
+  "version": "1.0.3",
+  "description": "LoopSearch — Circle to Search for Windows with Liquid Glass overlay, Google Lens, offline OCR, and AI insights.",
+  "main": "src/main/main.js",
+  "author": "Aveesha Senevirathne",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "build:win": "electron-builder --win portable --x64"
+  },
+  "dependencies": {
+    "jsqr": "^1.4.0"
+  },
+  "devDependencies": {
+    "electron": "41.10.7",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.loopsearch.windows",
+    "productName": "LoopSearch",
+    "asar": true,
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "build/AppIcon.png",
+      "build/AppIcon.ico",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/AppIcon.ico",
+      "signExecutable": false
+    },
+    "portable": {
+      "artifactName": "LoopSearch.exe"
+    }
+  }
+}

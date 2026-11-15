@@ -1,0 +1,617 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>LoopSearch Overlay</title>
+  <link rel="stylesheet" href="./styles/liquid-glass.css" />
+  <style>
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    #overlay-root {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    #screen-canvas, #fx-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    #fx-canvas {
+      cursor: crosshair;
+      z-index: 2;
+    }
+
+    /* Live OCR clickable line boxes in Text Mode */
+    #ocr-layer {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+      pointer-events: none;
+    }
+
+    .ocr-word-box {
+      position: absolute;
+      pointer-events: auto;
+      border-radius: 4px;
+      border: 1px solid rgba(56, 189, 248, 0.55);
+      background: rgba(56, 189, 248, 0.14);
+      cursor: pointer;
+      transition: background 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+    }
+
+    .ocr-word-box:hover {
+      background: rgba(56, 189, 248, 0.34);
+      border-color: #7dd3fc;
+      transform: scale(1.02);
+    }
+
+    /* Bottom Liquid Glass Capsule */
+    #prompt-capsule {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: 22px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px 6px 12px;
+      border-radius: 999px;
+      background: rgba(9, 13, 27, 0.88);
+      backdrop-filter: blur(22px) saturate(160%);
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      box-shadow:
+        0 14px 36px rgba(0, 0, 0, 0.52),
+        0 0 28px rgba(56, 189, 248, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.24);
+      animation: capsuleIn 0.36s var(--spring-snappy) both;
+      white-space: nowrap;
+    }
+
+    [data-theme='light'] #prompt-capsule {
+      background: rgba(244, 247, 252, 0.90);
+      border-color: rgba(15, 23, 42, 0.15);
+      color: #0f172a;
+    }
+
+    @keyframes capsuleIn {
+      from { opacity: 0; transform: translate(-50%, 18px) scale(0.94); }
+      to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+    }
+
+    .capsule-drag-handle {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      cursor: grab;
+      padding-right: 4px;
+    }
+
+    .capsule-drag-handle:active { cursor: grabbing; }
+
+    .capsule-hint {
+      font-size: 12px;
+      font-weight: 560;
+      color: var(--text-secondary);
+      max-width: 210px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .capsule-divider {
+      width: 1px;
+      height: 18px;
+      background: var(--border-subtle);
+      margin: 0 2px;
+    }
+
+    .mode-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: rgba(255, 255, 255, 0.055);
+      border-radius: 999px;
+      padding: 2px;
+    }
+
+    [data-theme='light'] .mode-group {
+      background: rgba(15, 23, 42, 0.06);
+    }
+
+    .mode-pill {
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
+      font-family: var(--font-sans);
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 5px 10px;
+      border-radius: 999px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.2s var(--spring-snappy);
+    }
+
+    .mode-pill:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .mode-pill.active {
+      background: linear-gradient(135deg, var(--accent-secondary), var(--accent-primary));
+      border-color: rgba(125, 211, 252, 0.55);
+      color: #ffffff;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.42);
+    }
+
+    .cap-icon-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      border: 1px solid var(--border-subtle);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-secondary);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.18s var(--spring-snappy);
+    }
+
+    .cap-icon-btn:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.14);
+      transform: scale(1.06);
+    }
+
+    /* Capture History Popover */
+    #history-popover {
+      position: absolute;
+      bottom: 74px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 340px;
+      max-height: 320px;
+      z-index: 25;
+      border-radius: 18px;
+      background: var(--surface-shell);
+      backdrop-filter: blur(24px);
+      border: 1px solid var(--border-strong);
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.56);
+      padding: 12px;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    #history-popover.open {
+      display: flex;
+      animation: shellEnter 0.22s var(--spring-snappy) both;
+    }
+
+    .hist-list {
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 246px;
+    }
+
+    .hist-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 6px 8px;
+      border-radius: 11px;
+      background: var(--surface-card);
+      border: 1px solid var(--border-subtle);
+      cursor: pointer;
+    }
+
+    .hist-item:hover {
+      background: var(--surface-card-hover);
+      border-color: rgba(56, 189, 248, 0.4);
+    }
+
+    .hist-thumb {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      object-fit: cover;
+      background: #090d1a;
+      flex-shrink: 0;
+    }
+
+    /* Floating Results Sheet */
+    #results-sheet {
+      position: absolute;
+      z-index: 30;
+      width: 416px;
+      height: 580px;
+      min-width: 340px;
+      min-height: 360px;
+      display: none;
+      flex-direction: column;
+      border-radius: 22px;
+      background: rgba(8, 12, 24, 0.94);
+      backdrop-filter: blur(26px) saturate(170%);
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      box-shadow:
+        0 24px 60px rgba(0, 0, 0, 0.62),
+        0 0 36px rgba(56, 189, 248, 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.24);
+      overflow: hidden;
+    }
+
+    [data-theme='light'] #results-sheet {
+      background: rgba(246, 248, 253, 0.96);
+      border-color: rgba(15, 23, 42, 0.16);
+    }
+
+    #results-sheet.open {
+      display: flex;
+      animation: sheetPop 0.34s var(--spring-snappy) both;
+    }
+
+    @keyframes sheetPop {
+      from { opacity: 0; transform: scale(0.94) translateY(10px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .sheet-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 10px 12px 8px;
+      cursor: grab;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .sheet-header:active { cursor: grabbing; }
+
+    .sheet-title-cluster {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .engine-select {
+      border: 1px solid var(--border-subtle);
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--text-primary);
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-family: var(--font-sans);
+      font-size: 11.5px;
+      font-weight: 640;
+      cursor: pointer;
+    }
+
+    .sheet-actions {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .sheet-hero-bar {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 12px 6px;
+    }
+
+    #crop-thumb {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      object-fit: cover;
+      border: 1px solid rgba(56, 189, 248, 0.45);
+      background: #0a1020;
+      flex-shrink: 0;
+    }
+
+    .search-pill-wrap {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface-input);
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      padding: 3px 4px 3px 12px;
+    }
+
+    .search-pill-wrap:focus-within {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.18);
+    }
+
+    #follow-up-input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 12.2px;
+      outline: none;
+      min-width: 0;
+    }
+
+    #follow-up-send {
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      border: none;
+      background: linear-gradient(135deg, var(--accent-secondary), var(--accent-primary));
+      color: #ffffff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .ocr-preview-line {
+      margin: 0 12px 5px;
+      padding: 5px 10px;
+      border-radius: 9px;
+      background: rgba(255, 255, 255, 0.045);
+      border: 1px solid var(--border-subtle);
+      font-size: 11.2px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: none;
+    }
+
+    .smart-chips-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 12px 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .smart-chips-bar::-webkit-scrollbar { display: none; }
+
+    .smart-chip {
+      border: 1px solid var(--border-subtle);
+      background: var(--surface-pill);
+      color: var(--text-primary);
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-family: var(--font-sans);
+      font-size: 11.2px;
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+      transition: all 0.18s var(--spring-snappy);
+    }
+
+    .smart-chip:hover {
+      background: rgba(56, 189, 248, 0.22);
+      border-color: rgba(56, 189, 248, 0.55);
+    }
+
+    .smart-chip.accent {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.22), rgba(37, 99, 235, 0.28));
+      border-color: rgba(56, 189, 248, 0.48);
+    }
+
+    .color-swatch-circle {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.45);
+    }
+
+    #ai-answer-card {
+      margin: 0 12px 8px;
+      padding: 10px 12px;
+      border-radius: 13px;
+      background: linear-gradient(145deg, rgba(37, 99, 235, 0.18), rgba(56, 189, 248, 0.10));
+      border: 1px solid rgba(56, 189, 248, 0.36);
+      max-height: 165px;
+      overflow-y: auto;
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .ai-answer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.2px;
+      font-weight: 700;
+      color: #7dd3fc;
+    }
+
+    .ai-answer-text {
+      font-size: 12px;
+      line-height: 1.48;
+      color: var(--text-primary);
+      user-select: text;
+      white-space: pre-wrap;
+    }
+
+    .webview-stage {
+      position: relative;
+      flex: 1;
+      margin: 0 10px 10px;
+      border-radius: 15px;
+      overflow: hidden;
+      border: 1px solid var(--border-subtle);
+      background: #0b0e18;
+      display: flex;
+    }
+
+    [data-theme='light'] .webview-stage {
+      background: #ffffff;
+    }
+
+    #lens-webview {
+      width: 100%;
+      height: 100%;
+      flex: 1;
+      border: none;
+      background: transparent;
+    }
+
+    #wv-loader {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: rgba(8, 11, 22, 0.88);
+      backdrop-filter: blur(12px);
+      z-index: 4;
+      transition: opacity 0.25s ease;
+    }
+
+    #wv-loader.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .resize-corner {
+      position: absolute;
+      right: 4px;
+      bottom: 4px;
+      width: 16px;
+      height: 16px;
+      cursor: nwse-resize;
+      z-index: 40;
+      display: flex;
+      align-items: flex-end;
+      justify-content: flex-end;
+      padding: 3px;
+    }
+
+    .resize-corner::after {
+      content: '';
+      width: 8px;
+      height: 8px;
+      border-right: 2px solid rgba(148, 163, 184, 0.5);
+      border-bottom: 2px solid rgba(148, 163, 184, 0.5);
+      border-radius: 1px;
+    }
+  </style>
+</head>
+<body>
+  <div id="overlay-root">
+    <canvas id="screen-canvas"></canvas>
+    <canvas id="fx-canvas"></canvas>
+    <div id="ocr-layer"></div>
+
+    <!-- Capture History Popover -->
+    <div id="history-popover">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-size:12px;font-weight:700;">Recent Captures</span>
+        <button class="chip-btn" id="clear-hist-btn" style="padding:3px 8px;font-size:10.5px;">Clear</button>
+      </div>
+      <div class="hist-list" id="hist-list"></div>
+    </div>
+
+    <!-- Bottom Liquid Glass Capsule Dock -->
+    <div id="prompt-capsule">
+      <div class="capsule-drag-handle" id="capsule-drag">
+        <span id="capsule-brand"></span>
+        <span class="capsule-hint" id="capsule-hint">Drag a box around anything</span>
+      </div>
+      <div class="capsule-divider"></div>
+      <div class="mode-group" id="mode-group">
+        <button class="mode-pill active" data-mode="box" id="mode-box"></button>
+        <button class="mode-pill" data-mode="freehand" id="mode-freehand"></button>
+        <button class="mode-pill" data-mode="tap" id="mode-tap"></button>
+        <button class="mode-pill" data-mode="text" id="mode-text"></button>
+      </div>
+      <div class="capsule-divider"></div>
+      <button class="cap-icon-btn" id="cap-history-btn" title="Recent Captures"></button>
+      <button class="cap-icon-btn" id="cap-studio-btn" title="LoopSearch Studio"></button>
+      <button class="cap-icon-btn" id="cap-close-btn" title="Close (Esc)"></button>
+    </div>
+
+    <!-- Floating Google Lens / AI Results Sheet -->
+    <div id="results-sheet">
+      <div class="top-specular-rim" style="left:20px;right:20px;"></div>
+
+      <div class="sheet-header" id="sheet-header">
+        <div class="sheet-title-cluster">
+          <button class="cap-icon-btn" id="sheet-back-btn" title="Back"></button>
+          <span id="sheet-brand" style="display:flex;align-items:center;"></span>
+          <button class="engine-select" id="engine-cycle-btn" title="Switch Engine">Google Lens ▾</button>
+        </div>
+        <div class="sheet-actions">
+          <button class="cap-icon-btn" id="sheet-dark-btn" title="Toggle Webview Theme"></button>
+          <button class="cap-icon-btn" id="sheet-pin-btn" title="Pin Crop (P)"></button>
+          <button class="cap-icon-btn" id="sheet-ext-btn" title="Open in Browser"></button>
+          <button class="cap-icon-btn" id="sheet-expand-btn" title="Expand / Restore"></button>
+          <button class="cap-icon-btn" id="sheet-close-btn" title="Close Results"></button>
+        </div>
+      </div>
+
+      <div class="sheet-hero-bar">
+        <img id="crop-thumb" alt="Selected region" />
+        <div class="search-pill-wrap">
+          <input type="text" id="follow-up-input" placeholder="Add to your search or ask AI..." />
+          <button id="follow-up-send" title="Send"></button>
+        </div>
+      </div>
+
+      <div class="ocr-preview-line" id="ocr-preview-line"></div>
+      <div class="smart-chips-bar" id="smart-chips-bar"></div>
+
+      <div id="ai-answer-card">
+        <div class="ai-answer-header">
+          <span>✨ LoopSearch AI Insight</span>
+          <div style="display:flex;gap:6px;">
+            <button class="chip-btn" id="copy-ai-btn" style="padding:2px 8px;font-size:10.5px;">Copy</button>
+            <button class="chip-btn" id="close-ai-btn" style="padding:2px 8px;font-size:10.5px;">Hide</button>
+          </div>
+        </div>
+        <div class="ai-answer-text" id="ai-answer-text"></div>
+      </div>
+
+      <div class="webview-stage">
+        <webview id="lens-webview" partition="persist:lens"></webview>
+        <div id="wv-loader">
+          <div id="loader-orb-slot"></div>
+          <div id="loader-status-text" style="font-size:12.5px;font-weight:600;color:#bae6fd;">Searching with Google Lens...</div>
+        </div>
+      </div>
+
+      <div class="resize-corner" id="sheet-resize-handle"></div>
+    </div>
+  </div>
+
+  <script src="../shared/visionHelpers.js"></script>
+  <script src="./js/motion-and-glass.js"></script>
+  <script src="./js/overlay.js"></script>
+</body>
+</html>
