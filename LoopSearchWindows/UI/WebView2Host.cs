@@ -311,6 +311,7 @@ public sealed class WebView2Host : NativeControlHost
         {
             return """
             (function() {
+                if (location.pathname.indexOf('/sorry') === 0) return;
                 document.documentElement.style.colorScheme = 'light';
                 var st = document.getElementById('cts-theme-style');
                 if (st) st.remove();
@@ -327,6 +328,7 @@ public sealed class WebView2Host : NativeControlHost
 
         return """
         (function() {
+            if (location.pathname.indexOf('/sorry') === 0) return;
             document.documentElement.style.colorScheme = 'dark';
             var st = document.getElementById('cts-theme-style');
             if (!st) {
@@ -334,10 +336,14 @@ public sealed class WebView2Host : NativeControlHost
                 st.id = 'cts-theme-style';
                 st.textContent = `
                     html, body {
-                        background: #0b101d !important;
-                        color: #e9f1ff !important;
+                        background: #090e1a !important;
+                        color: #edf2fb !important;
                     }
-                    a { color: #7cc4ff !important; }
+                    ::-webkit-scrollbar { width: 6px; height: 6px; }
+                    ::-webkit-scrollbar-track { background: transparent; }
+                    ::-webkit-scrollbar-thumb { background: rgba(130, 175, 255, 0.26); border-radius: 99px; }
+                    ::-webkit-scrollbar-thumb:hover { background: rgba(130, 175, 255, 0.45); }
+                    a, a * { color: #7cc4ff !important; }
                     code, pre, kbd, samp, tt, mark {
                         background: #17233b !important;
                         color: #dbeafe !important;
@@ -348,33 +354,43 @@ public sealed class WebView2Host : NativeControlHost
                 `;
                 (document.head || document.documentElement).appendChild(st);
             }
-            var all = document.getElementsByTagName('*');
-            var limit = Math.min(all.length, 1800);
-            for (var i = 0; i < limit; i++) {
-                var el = all[i];
-                var tag = el.tagName;
-                if (tag === 'IMG' || tag === 'VIDEO' || tag === 'CANVAS' || tag === 'SVG' || tag === 'PATH') continue;
-                var cs = window.getComputedStyle(el);
-                if (!cs) continue;
-                var bg = cs.backgroundColor;
-                if (bg && bg.indexOf('rgb') === 0) {
-                    var m = bg.match(/\d+/g);
-                    if (m && m.length >= 3) {
-                        var a = m.length >= 4 ? parseFloat(m[3]) : 255;
-                        var r = parseInt(m[0]), g = parseInt(m[1]), b = parseInt(m[2]);
-                        var lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                        if (a > 20 && lum > 175) {
-                            el.style.setProperty('background-color', '#11192c', 'important');
-                            el.style.setProperty('color', '#e9f1ff', 'important');
-                            el.setAttribute('data-cts-darkbg', '1');
+            function applyDarkPass() {
+                var all = document.getElementsByTagName('*');
+                var limit = Math.min(all.length, 2000);
+                for (var i = 0; i < limit; i++) {
+                    var el = all[i];
+                    var tag = el.tagName;
+                    if (tag === 'IMG' || tag === 'VIDEO' || tag === 'CANVAS' || tag === 'SVG' || tag === 'PATH') continue;
+                    var cs = window.getComputedStyle(el);
+                    if (!cs) continue;
+                    var bg = cs.backgroundColor;
+                    if (bg && bg.indexOf('rgb') === 0) {
+                        var m = bg.match(/\d+/g);
+                        if (m && m.length >= 3) {
+                            var a = m.length >= 4 ? parseFloat(m[3]) : 255;
+                            var r = parseInt(m[0]), g = parseInt(m[1]), b = parseInt(m[2]);
+                            if (a > 20 && r > 155 && g > 155 && b > 155) {
+                                el.style.setProperty('background-color', '#11192c', 'important');
+                                el.style.setProperty('color', '#edf2fb', 'important');
+                                el.setAttribute('data-cts-darkbg', '1');
+                            }
                         }
                     }
+                    if (cs.backgroundImage && cs.backgroundImage.indexOf('gradient') !== -1 && cs.backgroundImage.indexOf('255') !== -1) {
+                        el.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(9, 14, 26, 0), rgba(9, 14, 26, 0.96))', 'important');
+                        el.setAttribute('data-cts-darkbg', '1');
+                    }
                 }
-                if (cs.backgroundImage && cs.backgroundImage.indexOf('gradient') !== -1 && cs.backgroundImage.indexOf('255') !== -1) {
-                    el.style.setProperty('background-image', 'none', 'important');
-                    el.style.setProperty('background-color', '#11192c', 'important');
-                    el.setAttribute('data-cts-darkbg', '1');
-                }
+            }
+            applyDarkPass();
+            if (!window.__ctsThemeObserver && document.body) {
+                var queued = false;
+                window.__ctsThemeObserver = new MutationObserver(function() {
+                    if (queued) return;
+                    queued = true;
+                    requestAnimationFrame(function() { queued = false; applyDarkPass(); });
+                });
+                window.__ctsThemeObserver.observe(document.body, { childList: true, subtree: true });
             }
         })();
         """;

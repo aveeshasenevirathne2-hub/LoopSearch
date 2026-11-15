@@ -49,12 +49,25 @@ public sealed class PinnedCaptureWindow : Window
         {
             NativeWin32.CopyBitmapToClipboard(croppedBitmap);
             ToastWindow.ShowToast("Copied pinned image to clipboard");
-        }, height: 24);
+        }, height: 24, iconPath: LiquidGlassIcons.CopyDoc);
         Grid.SetColumn(copyBtn, 2);
         copyBtn.Margin = new Thickness(0, 0, 6, 0);
         header.Children.Add(copyBtn);
 
-        var closeBtn = LiquidGlassUI.CreateGlassButton("×", Close, height: 24);
+        var closeBtn = new Button
+        {
+            Content = LiquidGlassIcons.StrokeIcon(LiquidGlassIcons.CloseX, 11, ThemePalette.PrimaryBrush, 1.8),
+            Width = 24,
+            Height = 24,
+            Padding = new Thickness(0),
+            CornerRadius = new CornerRadius(12),
+            Background = new SolidColorBrush(ThemePalette.CardSubtleFill),
+            BorderBrush = new SolidColorBrush(ThemePalette.CardBorder),
+            BorderThickness = new Thickness(1),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        closeBtn.Click += (_, _) => Close();
         Grid.SetColumn(closeBtn, 3);
         header.Children.Add(closeBtn);
 

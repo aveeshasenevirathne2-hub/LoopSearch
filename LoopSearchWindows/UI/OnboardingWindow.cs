@@ -11,18 +11,15 @@ namespace LoopSearch.UI;
 
 public sealed class OnboardingWindow : Window
 {
-    private int _step;
-    private readonly ContentControl _stepContainer = new();
-    private readonly Border[] _dots = new Border[4];
-    private readonly Button _backBtn;
-    private readonly Button _nextBtn;
     private readonly Action _onStartFirstSearch;
     private readonly Action _onOpenGuide;
     private readonly Action _onHotkeyChanged;
 
     private bool _isRecordingHotkey;
     private Button? _recordHotkeyBtn;
-    private TextBlock? _hotkeyDisplayLabel;
+    private TextBlock? _hotkeyBadgeLabel;
+    private TextBlock? _authStatusLabel;
+    private Button? _authActionBtn;
 
     public OnboardingWindow(Action onStartFirstSearch, Action onOpenGuide, Action onHotkeyChanged)
     {
@@ -30,330 +27,293 @@ public sealed class OnboardingWindow : Window
         _onOpenGuide = onOpenGuide;
         _onHotkeyChanged = onHotkeyChanged;
 
-        LiquidGlassUI.ConfigureWindowChrome(this, 620, 560, "Welcome to LoopSearch");
+        var cards = new List<Control>();
+        var mainStack = new StackPanel { Spacing = 9, Margin = new Thickness(22, 4, 22, 18) };
 
-        var rootGrid = new Grid();
-        rootGrid.Children.Add(new HorizonBackgroundView());
-
-        var mainDock = new DockPanel { Margin = new Thickness(26, 22, 26, 20) };
-
-        // Top header
-        var topRow = new StackPanel
+        // Header
+        var hdr = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Margin = new Thickness(0, 0, 0, 4) };
+        hdr.Children.Add(LiquidGlassUI.CreateBrandBadge(40));
+        var hCol = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
+        hCol.Children.Add(new TextBlock
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 12,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 0, 0, 14)
-        };
-        topRow.Children.Add(LiquidGlassUI.CreateBrandBadge(42));
-        var titleCol = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        titleCol.Children.Add(new TextBlock
-        {
-            Text = "LoopSearch",
-            FontSize = 20,
+            Text = "Welcome to LoopSearch",
+            FontSize = 19,
             FontWeight = FontWeight.Bold,
             Foreground = ThemePalette.PrimaryBrush
         });
-        titleCol.Children.Add(new TextBlock
+        hCol.Children.Add(new TextBlock
         {
-            Text = "Circle, box, or tap anything on your Windows screen",
-            FontSize = 12,
+            Text = "Sign in with Google and configure visual screen search, instant OCR, and AI.",
+            FontSize = 11.5,
             Foreground = ThemePalette.SecondaryBrush
         });
-        topRow.Children.Add(titleCol);
-        DockPanel.SetDock(topRow, Dock.Top);
-        mainDock.Children.Add(topRow);
+        hdr.Children.Add(hCol);
+        mainStack.Children.Add(hdr);
 
-        // Bottom nav
-        var navGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Margin = new Thickness(0, 14, 0, 0) };
-        _backBtn = LiquidGlassUI.CreateGlassButton("Back", () =>
-        {
-            if (_step > 0) { _step--; RenderStep(); }
-        });
-        navGrid.Children.Add(_backBtn);
+        // Step 1: Google Sign-In
+        var step1 = BuildStep1Account();
+        cards.Add(step1);
+        mainStack.Children.Add(step1);
 
-        var dotsRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        for (int i = 0; i < 4; i++)
-        {
-            _dots[i] = new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4) };
-            dotsRow.Children.Add(_dots[i]);
-        }
-        Grid.SetColumn(dotsRow, 1);
-        navGrid.Children.Add(dotsRow);
+        // Step 2: Windows Capture & Tray Access
+        var step2 = BuildStep2CaptureStatus();
+        cards.Add(step2);
+        mainStack.Children.Add(step2);
 
-        _nextBtn = LiquidGlassUI.CreatePrimaryButton("Continue", () =>
-        {
-            if (_step < 3)
-            {
-                _step++;
-                RenderStep();
-            }
-            else
-            {
-                AppSettings.Shared.HasCompletedOnboarding = true;
-                Close();
-                _onStartFirstSearch();
-            }
-        });
-        Grid.SetColumn(_nextBtn, 2);
-        navGrid.Children.Add(_nextBtn);
+        // Step 3: Global Shortcut Presets + Custom Recorder
+        var step3 = BuildStep3Shortcut();
+        cards.Add(step3);
+        mainStack.Children.Add(step3);
 
-        DockPanel.SetDock(navGrid, Dock.Bottom);
-        mainDock.Children.Add(navGrid);
+        // Step 4: Theme, Results Browser & Startup Toggles
+        var step4 = BuildStep4Appearance();
+        cards.Add(step4);
+        mainStack.Children.Add(step4);
 
-        mainDock.Children.Add(_stepContainer);
-        rootGrid.Children.Add(mainDock);
-        Content = rootGrid;
-
-        KeyDown += OnWindowKeyDown;
-        Opened += (_, _) => LiquidGlassUI.AnimateWindowEntrance(this, mainDock);
-        RenderStep();
-    }
-
-    private void RenderStep()
-    {
-        _isRecordingHotkey = false;
-        _backBtn.IsVisible = _step > 0;
-        if (_nextBtn.Content is TextBlock nb)
-            nb.Text = _step == 3 ? "Start First Search" : "Continue";
-
-        for (int i = 0; i < _dots.Length; i++)
-        {
-            bool active = i == _step;
-            _dots[i].Width = active ? 22 : 8;
-            _dots[i].Background = active ? ThemePalette.AccentButtonBrush : new SolidColorBrush(ThemePalette.CardBorder);
-        }
-
-        _stepContainer.Content = _step switch
-        {
-            0 => BuildAccountStep(),
-            1 => BuildHotkeyStep(),
-            2 => BuildThemeAndSystemStep(),
-            _ => BuildReadyStep()
-        };
-    }
-
-    private Control BuildAccountStep()
-    {
-        var auth = FirebaseAuthService.Shared;
-        var cardStack = new StackPanel { Spacing = 14 };
-        cardStack.Children.Add(new TextBlock
-        {
-            Text = "Step 1 · Sign in with Google",
-            FontSize = 16,
-            FontWeight = FontWeight.SemiBold,
-            Foreground = ThemePalette.PrimaryBrush
-        });
-        cardStack.Children.Add(new TextBlock
-        {
-            Text = "Connect your Google account to sync usage with LoopSearch Analytics and unlock seamless updates across your devices.",
-            FontSize = 12.5,
-            TextWrapping = TextWrapping.Wrap,
-            Foreground = ThemePalette.SecondaryBrush
-        });
-
-        var statusLabel = new TextBlock
-        {
-            Text = auth.IsSignedIn
-                ? $"Signed in as {auth.CurrentSession?.DisplayName} ({auth.CurrentSession?.Email})"
-                : "Not signed in yet (you can also sign in later from Settings).",
-            FontSize = 12,
-            Foreground = auth.IsSignedIn ? new SolidColorBrush(ThemePalette.SuccessGreen) : ThemePalette.MutedBrush,
-            TextWrapping = TextWrapping.Wrap
-        };
-        cardStack.Children.Add(statusLabel);
-
-        var btnRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-        var signInBtn = LiquidGlassUI.CreatePrimaryButton(auth.IsSignedIn ? "Switch Google Account" : "Sign in with Google", async () =>
-        {
-            statusLabel.Text = "Opening browser for Google Sign-In…";
-            var (ok, err) = await auth.SignInWithGoogleAsync();
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (ok)
-                {
-                    statusLabel.Foreground = new SolidColorBrush(ThemePalette.SuccessGreen);
-                    statusLabel.Text = $"Signed in as {auth.CurrentSession?.DisplayName} ({auth.CurrentSession?.Email})";
-                }
-                else
-                {
-                    statusLabel.Foreground = new SolidColorBrush(ThemePalette.WarningAmber);
-                    statusLabel.Text = err ?? "Sign-in cancelled.";
-                }
-            });
-        });
-        btnRow.Children.Add(signInBtn);
-
-        if (auth.IsSignedIn)
-        {
-            btnRow.Children.Add(LiquidGlassUI.CreateGlassButton("Sign Out", () =>
-            {
-                auth.SignOut();
-                RenderStep();
-            }));
-        }
-        cardStack.Children.Add(btnRow);
-
-        return LiquidGlassUI.CreateGlassCard(cardStack, padding: new Thickness(20));
-    }
-
-    private Control BuildHotkeyStep()
-    {
-        var stack = new StackPanel { Spacing = 12 };
-        stack.Children.Add(new TextBlock
-        {
-            Text = "Step 2 · Set Your Global Shortcut",
-            FontSize = 16,
-            FontWeight = FontWeight.SemiBold,
-            Foreground = ThemePalette.PrimaryBrush
-        });
-        stack.Children.Add(new TextBlock
-        {
-            Text = "Trigger LoopSearch from anywhere on Windows — even when minimized to the System Tray.",
-            FontSize = 12.5,
-            TextWrapping = TextWrapping.Wrap,
-            Foreground = ThemePalette.SecondaryBrush
-        });
-
-        _hotkeyDisplayLabel = new TextBlock
-        {
-            Text = $"Active Shortcut: {AppSettings.Shared.Hotkey.DisplayString}",
-            FontSize = 14,
-            FontWeight = FontWeight.Bold,
-            Foreground = ThemePalette.AccentCyanBrush
-        };
-        stack.Children.Add(_hotkeyDisplayLabel);
-
-        var presetsWrap = new WrapPanel { Orientation = Orientation.Horizontal };
-        foreach (var preset in CustomHotkey.Presets)
-        {
-            var p = preset;
-            var b = LiquidGlassUI.CreateGlassButton(p.CompactString, () =>
-            {
-                AppSettings.Shared.Hotkey = p;
-                _hotkeyDisplayLabel.Text = $"Active Shortcut: {p.DisplayString}";
-                _onHotkeyChanged();
-            }, height: 30);
-            b.Margin = new Thickness(0, 0, 8, 8);
-            presetsWrap.Children.Add(b);
-        }
-        stack.Children.Add(presetsWrap);
-
-        _recordHotkeyBtn = LiquidGlassUI.CreatePrimaryButton("Record Custom Shortcut…", () =>
-        {
-            _isRecordingHotkey = true;
-            if (_recordHotkeyBtn?.Content is TextBlock tb)
-                tb.Text = "Press modifier + key (e.g. Ctrl+Shift+Space)…";
-        });
-        stack.Children.Add(_recordHotkeyBtn);
-
-        return LiquidGlassUI.CreateGlassCard(stack, padding: new Thickness(20));
-    }
-
-    private Control BuildThemeAndSystemStep()
-    {
-        var stack = new StackPanel { Spacing = 12 };
-        stack.Children.Add(new TextBlock
-        {
-            Text = "Step 3 · Appearance & Startup",
-            FontSize = 16,
-            FontWeight = FontWeight.SemiBold,
-            Foreground = ThemePalette.PrimaryBrush
-        });
-
-        stack.Children.Add(LabeledRow("App Glass Theme", LiquidGlassUI.CreateSegmentedControl(
-            ["Auto", "Dark", "Light"],
-            (int)AppSettings.Shared.AppTheme,
-            idx => AppSettings.Shared.AppTheme = (AppTheme)idx)));
-
-        stack.Children.Add(LabeledRow("Results Browser Theme", LiquidGlassUI.CreateSegmentedControl(
-            ["Auto", "Dark", "Light"],
-            (int)AppSettings.Shared.WebResultsTheme,
-            idx => AppSettings.Shared.WebResultsTheme = (AppTheme)idx)));
-
-        stack.Children.Add(LabeledRow("Selection Glow", LiquidGlassUI.CreateSegmentedControl(
-            ["Loop Aura", "Spectrum"],
-            (int)AppSettings.Shared.GlowColorTheme,
-            idx => AppSettings.Shared.GlowColorTheme = (GlowColorTheme)idx)));
-
-        var startupCheck = new CheckBox
-        {
-            Content = "Launch LoopSearch automatically when Windows starts",
-            IsChecked = AppSettings.Shared.LaunchAtLogin,
-            Foreground = ThemePalette.PrimaryBrush,
-            FontSize = 12.5
-        };
-        startupCheck.IsCheckedChanged += (_, _) =>
-        {
-            bool val = startupCheck.IsChecked == true;
-            AppSettings.Shared.LaunchAtLogin = val;
-            NativeWin32.SetLaunchAtLogin(val);
-        };
-        stack.Children.Add(startupCheck);
-
-        var taskbarCheck = new CheckBox
-        {
-            Content = "Keep quick settings accessible in System Tray (and Taskbar when open)",
-            IsChecked = AppSettings.Shared.KeepInTaskbar,
-            Foreground = ThemePalette.PrimaryBrush,
-            FontSize = 12.5
-        };
-        taskbarCheck.IsCheckedChanged += (_, _) => AppSettings.Shared.KeepInTaskbar = taskbarCheck.IsChecked == true;
-        stack.Children.Add(taskbarCheck);
-
-        return LiquidGlassUI.CreateGlassCard(stack, padding: new Thickness(20));
-    }
-
-    private Control BuildReadyStep()
-    {
-        var stack = new StackPanel { Spacing = 12 };
-        stack.Children.Add(new TextBlock
-        {
-            Text = "You're All Set!",
-            FontSize = 18,
-            FontWeight = FontWeight.Bold,
-            Foreground = ThemePalette.PrimaryBrush
-        });
-        stack.Children.Add(new TextBlock
-        {
-            Text = $"Press {AppSettings.Shared.Hotkey.DisplayString} anytime (or click the LoopSearch System Tray icon) to freeze your screen and circle, box, tap, or copy text.",
-            FontSize = 12.5,
-            TextWrapping = TextWrapping.Wrap,
-            Foreground = ThemePalette.SecondaryBrush
-        });
-
-        var guideBtn = LiquidGlassUI.CreateGlassButton("View How-To Guide", () =>
+        // Footer Actions
+        var footer = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Margin = new Thickness(0, 4, 0, 0) };
+        var guideBtn = LiquidGlassUI.CreateGlassButton("How to Use Guide", () =>
         {
             AppSettings.Shared.HasCompletedOnboarding = true;
             Close();
             _onOpenGuide();
-        });
-        guideBtn.HorizontalAlignment = HorizontalAlignment.Left;
-        stack.Children.Add(guideBtn);
+        }, height: 32);
+        footer.Children.Add(guideBtn);
 
-        return LiquidGlassUI.CreateGlassCard(stack, padding: new Thickness(20));
-    }
-
-    private static Control LabeledRow(string label, Control control)
-    {
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("170,*"), Margin = new Thickness(0, 2) };
-        grid.Children.Add(new TextBlock
+        var startBtn = LiquidGlassUI.CreatePrimaryButton("Start First Search", () =>
         {
-            Text = label,
-            FontSize = 12.5,
-            Foreground = ThemePalette.SecondaryBrush,
-            VerticalAlignment = VerticalAlignment.Center
-        });
-        Grid.SetColumn(control, 1);
-        grid.Children.Add(control);
-        return grid;
+            AppSettings.Shared.HasCompletedOnboarding = true;
+            Close();
+            _onStartFirstSearch();
+        }, height: 34, iconPath: LiquidGlassIcons.SearchGlass);
+        Grid.SetColumn(startBtn, 2);
+        footer.Children.Add(startBtn);
+        mainStack.Children.Add(footer);
+
+        var shell = LiquidGlassUI.WrapBorderlessGlassShell(this, 636, 568, "Welcome to LoopSearch", mainStack, showTitleInBar: false);
+
+        KeyDown += OnWindowKeyDown;
+        Opened += (_, _) =>
+        {
+            AppleMotion.AnimateWindowEntrance(this, shell);
+            AppleMotion.StaggeredCardsReveal(cards, baseDelay: 0.05, stepDelay: 0.055);
+        };
     }
+
+    private Border BuildStep1Account()
+    {
+        var auth = FirebaseAuthService.Shared;
+        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        row.Children.Add(MakeStepBadge("1"));
+
+        var textCol = new StackPanel { Spacing = 2, Margin = new Thickness(10, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
+        textCol.Children.Add(new TextBlock { Text = "Sign in with Google", FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = ThemePalette.PrimaryBrush });
+        textCol.Children.Add(new TextBlock
+        {
+            Text = "Connect your Google account for LoopSearch Analytics & sync across setups.",
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = ThemePalette.SecondaryBrush
+        });
+        Grid.SetColumn(textCol, 1);
+        row.Children.Add(textCol);
+
+        var rightRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        _authStatusLabel = new TextBlock
+        {
+            Text = auth.IsSignedIn ? $"✓ {auth.CurrentSession?.DisplayName}" : "Optional",
+            FontSize = 11,
+            FontWeight = FontWeight.SemiBold,
+            Foreground = new SolidColorBrush(auth.IsSignedIn ? ThemePalette.SuccessGreen : ThemePalette.WarningAmber),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        rightRow.Children.Add(_authStatusLabel);
+
+        _authActionBtn = LiquidGlassUI.CreatePrimaryButton(auth.IsSignedIn ? "Switch Account" : "Sign in with Google", async () =>
+        {
+            if (_authStatusLabel != null)
+            {
+                _authStatusLabel.Text = "Opening browser…";
+                _authStatusLabel.Foreground = ThemePalette.AccentCyanBrush;
+            }
+            var (ok, err) = await auth.SignInWithGoogleAsync();
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_authStatusLabel == null) return;
+                if (ok)
+                {
+                    _authStatusLabel.Text = $"✓ {auth.CurrentSession?.DisplayName}";
+                    _authStatusLabel.Foreground = new SolidColorBrush(ThemePalette.SuccessGreen);
+                    if (_authActionBtn?.Content is StackPanel sp && sp.Children.OfType<TextBlock>().FirstOrDefault() is { } tb)
+                        tb.Text = "Switch Account";
+                }
+                else
+                {
+                    _authStatusLabel.Text = err ?? "Cancelled";
+                    _authStatusLabel.Foreground = new SolidColorBrush(ThemePalette.WarningAmber);
+                }
+            });
+        }, height: 28);
+        rightRow.Children.Add(_authActionBtn);
+        Grid.SetColumn(rightRow, 2);
+        row.Children.Add(rightRow);
+
+        return LiquidGlassUI.CreateGlassCard(row, padding: new Thickness(14, 11), radius: 14);
+    }
+
+    private Border BuildStep2CaptureStatus()
+    {
+        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        row.Children.Add(MakeStepBadge("2"));
+
+        var textCol = new StackPanel { Spacing = 2, Margin = new Thickness(10, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
+        textCol.Children.Add(new TextBlock { Text = "Screen Capture & System Tray Ready", FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = ThemePalette.PrimaryBrush });
+        textCol.Children.Add(new TextBlock
+        {
+            Text = "Runs quietly in your System Tray (bottom-right taskbar ^) with native WinRT OCR & WebView2.",
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = ThemePalette.SecondaryBrush
+        });
+        Grid.SetColumn(textCol, 1);
+        row.Children.Add(textCol);
+
+        var badgePill = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(35, 48, 209, 88)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(110, 48, 209, 88)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(9, 4),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new TextBlock { Text = "✓ Ready on Windows", FontSize = 11, FontWeight = FontWeight.SemiBold, Foreground = new SolidColorBrush(ThemePalette.SuccessGreen) }
+        };
+        Grid.SetColumn(badgePill, 2);
+        row.Children.Add(badgePill);
+
+        return LiquidGlassUI.CreateGlassCard(row, padding: new Thickness(14, 11), radius: 14);
+    }
+
+    private Border BuildStep3Shortcut()
+    {
+        var vstack = new StackPanel { Spacing = 8 };
+        var topRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        topRow.Children.Add(MakeStepBadge("3"));
+
+        var textCol = new StackPanel { Spacing = 1, Margin = new Thickness(10, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center };
+        textCol.Children.Add(new TextBlock { Text = "Choose or Record Global Shortcut", FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = ThemePalette.PrimaryBrush });
+        textCol.Children.Add(new TextBlock { Text = "Pick a quick preset or record your own key combination from start.", FontSize = 11, Foreground = ThemePalette.SecondaryBrush });
+        Grid.SetColumn(textCol, 1);
+        topRow.Children.Add(textCol);
+
+        _hotkeyBadgeLabel = new TextBlock
+        {
+            Text = AppSettings.Shared.Hotkey.CompactString,
+            FontFamily = new FontFamily("Consolas, Cascadia Mono, monospace"),
+            FontSize = 11.5,
+            FontWeight = FontWeight.SemiBold,
+            Foreground = ThemePalette.PrimaryBrush
+        };
+        var badgePill = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(40, 36, 144, 255)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(110, 92, 214, 255)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(10, 4),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = _hotkeyBadgeLabel
+        };
+        Grid.SetColumn(badgePill, 2);
+        topRow.Children.Add(badgePill);
+        vstack.Children.Add(topRow);
+
+        var controlsRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        var presetsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var preset in CustomHotkey.Presets.Take(3))
+        {
+            var p = preset;
+            presetsRow.Children.Add(LiquidGlassUI.CreateGlassButton(p.CompactString, () =>
+            {
+                _isRecordingHotkey = false;
+                AppSettings.Shared.Hotkey = p;
+                if (_hotkeyBadgeLabel != null) _hotkeyBadgeLabel.Text = p.CompactString;
+                _onHotkeyChanged();
+            }, height: 26));
+        }
+        controlsRow.Children.Add(presetsRow);
+
+        _recordHotkeyBtn = LiquidGlassUI.CreatePrimaryButton("Record Custom…", () =>
+        {
+            _isRecordingHotkey = true;
+            if (_recordHotkeyBtn?.Content is StackPanel sp && sp.Children.OfType<TextBlock>().FirstOrDefault() is { } tb)
+                tb.Text = "Press modifier + key…";
+        }, height: 26, iconPath: LiquidGlassIcons.Keyboard);
+        Grid.SetColumn(_recordHotkeyBtn, 1);
+        controlsRow.Children.Add(_recordHotkeyBtn);
+        vstack.Children.Add(controlsRow);
+
+        return LiquidGlassUI.CreateGlassCard(vstack, padding: new Thickness(14, 11), radius: 14);
+    }
+
+    private Border BuildStep4Appearance()
+    {
+        var vstack = new StackPanel { Spacing = 8 };
+        var topRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        topRow.Children.Add(MakeStepBadge("4"));
+
+        var textCol = new StackPanel { Spacing = 1, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        textCol.Children.Add(new TextBlock { Text = "Appearance, Results Browser & Visibility", FontSize = 13, FontWeight = FontWeight.SemiBold, Foreground = ThemePalette.PrimaryBrush });
+        textCol.Children.Add(new TextBlock { Text = "Choose Dark / Light mode for LoopSearch and Google Lens results.", FontSize = 11, Foreground = ThemePalette.SecondaryBrush });
+        Grid.SetColumn(textCol, 1);
+        topRow.Children.Add(textCol);
+        vstack.Children.Add(topRow);
+
+        var themesGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,12,*") };
+        var appThemeCol = new StackPanel { Spacing = 3 };
+        appThemeCol.Children.Add(new TextBlock { Text = "App Glass Theme", FontSize = 10.5, Foreground = ThemePalette.MutedBrush });
+        appThemeCol.Children.Add(LiquidGlassUI.CreateSegmentedControl(["Auto", "Dark", "Light"], (int)AppSettings.Shared.AppTheme, i => AppSettings.Shared.AppTheme = (AppTheme)i));
+        themesGrid.Children.Add(appThemeCol);
+
+        var webThemeCol = new StackPanel { Spacing = 3 };
+        webThemeCol.Children.Add(new TextBlock { Text = "Results Browser", FontSize = 10.5, Foreground = ThemePalette.MutedBrush });
+        webThemeCol.Children.Add(LiquidGlassUI.CreateSegmentedControl(["Auto", "Dark", "Light"], (int)AppSettings.Shared.WebResultsTheme, i => AppSettings.Shared.WebResultsTheme = (AppTheme)i));
+        Grid.SetColumn(webThemeCol, 2);
+        themesGrid.Children.Add(webThemeCol);
+        vstack.Children.Add(themesGrid);
+
+        var togglesRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 18 };
+        var launchCb = new CheckBox { Content = "Launch at Windows Login", IsChecked = AppSettings.Shared.LaunchAtLogin, FontSize = 11.5, Foreground = ThemePalette.PrimaryBrush };
+        launchCb.IsCheckedChanged += (_, _) => { bool v = launchCb.IsChecked == true; AppSettings.Shared.LaunchAtLogin = v; NativeWin32.SetLaunchAtLogin(v); };
+        togglesRow.Children.Add(launchCb);
+
+        var taskbarCb = new CheckBox { Content = "Show in Taskbar when open", IsChecked = AppSettings.Shared.KeepInTaskbar, FontSize = 11.5, Foreground = ThemePalette.PrimaryBrush };
+        taskbarCb.IsCheckedChanged += (_, _) => AppSettings.Shared.KeepInTaskbar = taskbarCb.IsChecked == true;
+        togglesRow.Children.Add(taskbarCb);
+        vstack.Children.Add(togglesRow);
+
+        return LiquidGlassUI.CreateGlassCard(vstack, padding: new Thickness(14, 11), radius: 14);
+    }
+
+    private static Border MakeStepBadge(string number) => new()
+    {
+        Width = 24,
+        Height = 24,
+        CornerRadius = new CornerRadius(12),
+        Background = ThemePalette.AccentButtonBrush,
+        BorderBrush = new SolidColorBrush(Color.FromArgb(140, 145, 228, 255)),
+        BorderThickness = new Thickness(1),
+        VerticalAlignment = VerticalAlignment.Center,
+        Child = new TextBlock
+        {
+            Text = number,
+            FontSize = 11.5,
+            FontWeight = FontWeight.Bold,
+            Foreground = Brushes.White,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        }
+    };
 
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
@@ -373,10 +333,9 @@ public sealed class OnboardingWindow : Window
             var hk = new CustomHotkey { VirtualKey = vk, Modifiers = mods };
             AppSettings.Shared.Hotkey = hk;
             _isRecordingHotkey = false;
-            if (_hotkeyDisplayLabel != null)
-                _hotkeyDisplayLabel.Text = $"Active Shortcut: {hk.DisplayString}";
-            if (_recordHotkeyBtn?.Content is TextBlock tb)
-                tb.Text = "Record Custom Shortcut…";
+            if (_hotkeyBadgeLabel != null) _hotkeyBadgeLabel.Text = hk.CompactString;
+            if (_recordHotkeyBtn?.Content is StackPanel sp && sp.Children.OfType<TextBlock>().FirstOrDefault() is { } tb)
+                tb.Text = "Record Custom…";
             _onHotkeyChanged();
             e.Handled = true;
         }

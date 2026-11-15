@@ -7,7 +7,16 @@ using Microsoft.Win32;
 
 namespace LoopSearch.Services;
 
-public sealed record ScreenCaptureData(Bitmap Bitmap, int VirtualX, int VirtualY, int Width, int Height);
+public sealed record ScreenCaptureData(
+    Bitmap Bitmap,
+    int VirtualX,
+    int VirtualY,
+    int Width,
+    int Height,
+    int WorkX,
+    int WorkY,
+    int WorkWidth,
+    int WorkHeight);
 
 public static class NativeWin32
 {
@@ -72,6 +81,23 @@ public static class NativeWin32
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    private static readonly IntPtr HWND_TOPMOST = new(-1);
+    private const uint SWP_SHOWWINDOW = 0x0040;
+    private const uint SWP_FRAMECHANGED = 0x0020;
+    private const int GWL_STYLE = -16;
+    private const int WS_CAPTION = 0x00C00000;
+    private const int WS_THICKFRAME = 0x00040000;
+    private const int WS_POPUP = unchecked((int)0x80000000);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT { public int X; public int Y; }
 
@@ -98,7 +124,11 @@ public static class NativeWin32
             int y = mi.rcMonitor.Top;
             int w = Math.Max(1, mi.rcMonitor.Right - mi.rcMonitor.Left);
             int h = Math.Max(1, mi.rcMonitor.Bottom - mi.rcMonitor.Top);
-            return CaptureRegion(x, y, w, h);
+            int wx = mi.rcWork.Left;
+            int wy = mi.rcWork.Top;
+            int ww = Math.Max(1, mi.rcWork.Right - mi.rcWork.Left);
+            int wh = Math.Max(1, mi.rcWork.Bottom - mi.rcWork.Top);
+            return CaptureRegion(x, y, w, h, wx, wy, ww, wh);
         }
         return CaptureVirtualScreen();
     }
@@ -109,10 +139,11 @@ public static class NativeWin32
         int y = GetSystemMetrics(SM_YVIRTUALSCREEN);
         int w = Math.Max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN));
         int h = Math.Max(1, GetSystemMetrics(SM_CYVIRTUALSCREEN));
-        return CaptureRegion(x, y, w, h);
+        return CaptureRegion(x, y, w, h, x, y, w, h);
     }
 
-    public static ScreenCaptureData CaptureRegion(int x, int y, int width, int height)
+    public static ScreenCaptureData CaptureRegion(int x, int y, int width, int height,
+        int? workX = null, int? workY = null, int? workWidth = null, int? workHeight = null)
     {
         IntPtr hdcScreen = GetDC(IntPtr.Zero);
         IntPtr hdcMem = CreateCompatibleDC(hdcScreen);
@@ -127,7 +158,9 @@ public static class NativeWin32
             {
                 g.DrawImageUnscaled(raw, 0, 0);
             }
-            return new ScreenCaptureData(copy, x, y, width, height);
+            return new ScreenCaptureData(
+                copy, x, y, width, height,
+                workX ?? x, workY ?? y, workWidth ?? width, workHeight ?? height);
         }
         finally
         {
@@ -136,6 +169,19 @@ public static class NativeWin32
             DeleteDC(hdcMem);
             ReleaseDC(IntPtr.Zero, hdcScreen);
         }
+    }
+
+    public static void ForceTopmostBounds(IntPtr hwnd, int x, int y, int width, int height)
+    {
+        if (hwnd == IntPtr.Zero || !OperatingSystem.IsWindows()) return;
+        try
+        {
+            int style = GetWindowLong(hwnd, GWL_STYLE);
+            style = (style & ~(WS_CAPTION | WS_THICKFRAME)) | WS_POPUP;
+            SetWindowLong(hwnd, GWL_STYLE, style);
+            SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+        }
+        catch { }
     }
 
     public static void ApplyGlassWindowAttributes(IntPtr hwnd, bool isDark, bool useBackdrop = true)

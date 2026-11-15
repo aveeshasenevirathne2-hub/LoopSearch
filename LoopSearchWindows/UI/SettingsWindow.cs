@@ -7,7 +7,6 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using LoopSearch.Models;
 using LoopSearch.Services;
-using SelectionMode = LoopSearch.Models.SelectionMode;
 
 namespace LoopSearch.UI;
 
@@ -21,15 +20,12 @@ public sealed class SettingsWindow : Window
     public SettingsWindow(Action onHotkeyChanged)
     {
         _onHotkeyChanged = onHotkeyChanged;
-        LiquidGlassUI.ConfigureWindowChrome(this, 660, 700, "LoopSearch Studio Settings", resizable: true);
 
-        var rootGrid = new Grid();
-        rootGrid.Children.Add(new HorizonBackgroundView());
-
-        var mainStack = new StackPanel { Spacing = 14, Margin = new Thickness(24, 20) };
+        var cards = new List<Control>();
+        var mainStack = new StackPanel { Spacing = 12, Margin = new Thickness(24, 4, 24, 22) };
 
         // Header
-        var hdr = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        var hdr = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Margin = new Thickness(0, 0, 0, 2) };
         hdr.Children.Add(LiquidGlassUI.CreateBrandBadge(40));
         var hText = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         hText.Children.Add(new TextBlock { Text = "Studio Settings", FontSize = 19, FontWeight = FontWeight.Bold, Foreground = ThemePalette.PrimaryBrush });
@@ -37,22 +33,14 @@ public sealed class SettingsWindow : Window
         hdr.Children.Add(hText);
         mainStack.Children.Add(hdr);
 
-        // 1. Account & Analytics
-        mainStack.Children.Add(BuildAccountSection());
+        var c1 = BuildAccountSection();
+        var c2 = BuildCaptureSection();
+        var c3 = BuildAppearanceSection();
+        var c4 = BuildSystemSection();
+        var c5 = BuildHistorySection();
+        cards.AddRange([c1, c2, c3, c4, c5]);
+        foreach (var c in cards) mainStack.Children.Add(c);
 
-        // 2. Shortcut & Capture
-        mainStack.Children.Add(BuildCaptureSection());
-
-        // 3. Appearance & Motion
-        mainStack.Children.Add(BuildAppearanceSection());
-
-        // 4. System & Optional Gemini AI
-        mainStack.Children.Add(BuildSystemSection());
-
-        // 5. Recent History
-        mainStack.Children.Add(BuildHistorySection());
-
-        // Footer actions
         var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
         footer.Children.Add(LiquidGlassUI.CreateGlassButton("Copy Diagnostics", async () =>
         {
@@ -61,7 +49,7 @@ public sealed class SettingsWindow : Window
             var report = AppSettings.Shared.BuildDiagnosticsReport(authSummary);
             if (Clipboard != null) await Clipboard.SetTextAsync(report);
             ToastWindow.ShowToast("Copied diagnostics to clipboard");
-        }));
+        }, iconPath: LiquidGlassIcons.CopyDoc));
         footer.Children.Add(LiquidGlassUI.CreateGlassButton("Check for Updates", async () =>
         {
             var upd = await AppUpdateChecker.CheckForUpdatesAsync();
@@ -85,11 +73,14 @@ public sealed class SettingsWindow : Window
         mainStack.Children.Add(footer);
 
         var scroll = new ScrollViewer { Content = mainStack };
-        rootGrid.Children.Add(scroll);
-        Content = rootGrid;
+        var shell = LiquidGlassUI.WrapBorderlessGlassShell(this, 668, 700, "LoopSearch Studio Settings", scroll, showTitleInBar: false, resizable: true);
 
         KeyDown += OnSettingsKeyDown;
-        Opened += (_, _) => LiquidGlassUI.AnimateWindowEntrance(this, mainStack);
+        Opened += (_, _) =>
+        {
+            AppleMotion.AnimateWindowEntrance(this, shell);
+            AppleMotion.StaggeredCardsReveal(cards, baseDelay: 0.04, stepDelay: 0.045);
+        };
     }
 
     private Control BuildAccountSection()
@@ -101,9 +92,9 @@ public sealed class SettingsWindow : Window
         var status = new TextBlock
         {
             Text = auth.IsSignedIn
-                ? $"Signed in as {auth.CurrentSession?.DisplayName} · {auth.CurrentSession?.Email}"
+                ? $"✓ Signed in as {auth.CurrentSession?.DisplayName} · {auth.CurrentSession?.Email}"
                 : "Not signed in. Sign in with Google to sync with LoopSearch Analytics.",
-            FontSize = 12.5,
+            FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
             Foreground = auth.IsSignedIn ? new SolidColorBrush(ThemePalette.SuccessGreen) : ThemePalette.SecondaryBrush
         };
@@ -113,13 +104,14 @@ public sealed class SettingsWindow : Window
         row.Children.Add(LiquidGlassUI.CreatePrimaryButton(auth.IsSignedIn ? "Switch Google Account" : "Sign in with Google", async () =>
         {
             status.Text = "Waiting for browser Google Sign-In…";
+            status.Foreground = ThemePalette.AccentCyanBrush;
             var (ok, err) = await auth.SignInWithGoogleAsync();
             Dispatcher.UIThread.Post(() =>
             {
                 if (ok)
                 {
                     status.Foreground = new SolidColorBrush(ThemePalette.SuccessGreen);
-                    status.Text = $"Signed in as {auth.CurrentSession?.DisplayName} · {auth.CurrentSession?.Email}";
+                    status.Text = $"✓ Signed in as {auth.CurrentSession?.DisplayName} · {auth.CurrentSession?.Email}";
                 }
                 else
                 {
@@ -127,7 +119,7 @@ public sealed class SettingsWindow : Window
                     status.Text = err ?? "Sign-in cancelled.";
                 }
             });
-        }, height: 32));
+        }, height: 30));
 
         if (auth.IsSignedIn)
         {
@@ -136,14 +128,14 @@ public sealed class SettingsWindow : Window
                 auth.EnqueueEvent("manual_sync");
                 await auth.FlushPendingEventsAsync();
                 ToastWindow.ShowToast("Analytics synced", auth.LastAnalyticsError ?? "Sent to LoopSearch Analytics");
-            }, height: 32));
+            }, height: 30));
 
             row.Children.Add(LiquidGlassUI.CreateGlassButton("Sign Out", () =>
             {
                 auth.SignOut();
                 status.Foreground = ThemePalette.SecondaryBrush;
                 status.Text = "Signed out.";
-            }, height: 32));
+            }, height: 30));
         }
         s.Children.Add(row);
 
@@ -158,7 +150,7 @@ public sealed class SettingsWindow : Window
         _hotkeyLabel = new TextBlock
         {
             Text = $"Global Shortcut: {AppSettings.Shared.Hotkey.DisplayString}",
-            FontSize = 13,
+            FontSize = 12.5,
             FontWeight = FontWeight.SemiBold,
             Foreground = ThemePalette.AccentCyanBrush
         };
@@ -180,15 +172,16 @@ public sealed class SettingsWindow : Window
         _recordBtn = LiquidGlassUI.CreatePrimaryButton("Record Custom…", () =>
         {
             _isRecordingHotkey = true;
-            if (_recordBtn?.Content is TextBlock tb) tb.Text = "Press modifier + key…";
-        }, height: 28);
+            if (_recordBtn?.Content is StackPanel sp && sp.Children.OfType<TextBlock>().FirstOrDefault() is { } tb)
+                tb.Text = "Press modifier + key…";
+        }, height: 28, iconPath: LiquidGlassIcons.Keyboard);
         presetRow.Children.Add(_recordBtn);
         s.Children.Add(presetRow);
 
         s.Children.Add(Row("Default Mode", LiquidGlassUI.CreateSegmentedControl(
             ["Box", "Freehand", "Tap", "Text"],
             (int)AppSettings.Shared.DefaultMode,
-            idx => AppSettings.Shared.DefaultMode = (SelectionMode)idx)));
+            idx => AppSettings.Shared.DefaultMode = (LoopSearch.Models.SelectionMode)idx)));
 
         s.Children.Add(Row("Search Engine", LiquidGlassUI.CreateSegmentedControl(
             ["Lens", "Google", "Perplexity", "Bing", "Ask AI"],
@@ -241,7 +234,7 @@ public sealed class SettingsWindow : Window
             Content = "Launch LoopSearch at Windows login",
             IsChecked = AppSettings.Shared.LaunchAtLogin,
             Foreground = ThemePalette.PrimaryBrush,
-            FontSize = 12.5
+            FontSize = 12
         };
         launchCb.IsCheckedChanged += (_, _) =>
         {
@@ -253,10 +246,10 @@ public sealed class SettingsWindow : Window
 
         var welcomeCb = new CheckBox
         {
-            Content = "Show Welcome / Quick Launcher when opening app icon",
+            Content = "Show Ready toast when starting LoopSearch",
             IsChecked = AppSettings.Shared.ShowWelcomeOnLaunch,
             Foreground = ThemePalette.PrimaryBrush,
-            FontSize = 12.5
+            FontSize = 12
         };
         welcomeCb.IsCheckedChanged += (_, _) => AppSettings.Shared.ShowWelcomeOnLaunch = welcomeCb.IsChecked == true;
         s.Children.Add(welcomeCb);
@@ -266,12 +259,12 @@ public sealed class SettingsWindow : Window
             Content = "Play subtle capture sound",
             IsChecked = AppSettings.Shared.SoundEffects,
             Foreground = ThemePalette.PrimaryBrush,
-            FontSize = 12.5
+            FontSize = 12
         };
         soundCb.IsCheckedChanged += (_, _) => AppSettings.Shared.SoundEffects = soundCb.IsChecked == true;
         s.Children.Add(soundCb);
 
-        var keyRow = new Grid { ColumnDefinitions = new ColumnDefinitions("170,*,Auto"), Margin = new Thickness(0, 4, 0, 0) };
+        var keyRow = new Grid { ColumnDefinitions = new ColumnDefinitions("165,*,Auto"), Margin = new Thickness(0, 4, 0, 0) };
         keyRow.Children.Add(new TextBlock
         {
             Text = "Gemini API Key (Optional)",
@@ -341,18 +334,18 @@ public sealed class SettingsWindow : Window
     private static TextBlock SectionTitle(string title) => new()
     {
         Text = title,
-        FontSize = 14.5,
+        FontSize = 14,
         FontWeight = FontWeight.SemiBold,
         Foreground = ThemePalette.PrimaryBrush
     };
 
     private static Control Row(string label, Control ctrl)
     {
-        var g = new Grid { ColumnDefinitions = new ColumnDefinitions("160,*") };
+        var g = new Grid { ColumnDefinitions = new ColumnDefinitions("155,*") };
         g.Children.Add(new TextBlock
         {
             Text = label,
-            FontSize = 12.5,
+            FontSize = 12,
             Foreground = ThemePalette.SecondaryBrush,
             VerticalAlignment = VerticalAlignment.Center
         });
@@ -380,7 +373,8 @@ public sealed class SettingsWindow : Window
             AppSettings.Shared.Hotkey = hk;
             _isRecordingHotkey = false;
             if (_hotkeyLabel != null) _hotkeyLabel.Text = $"Global Shortcut: {hk.DisplayString}";
-            if (_recordBtn?.Content is TextBlock tb) tb.Text = "Record Custom…";
+            if (_recordBtn?.Content is StackPanel sp && sp.Children.OfType<TextBlock>().FirstOrDefault() is { } tb)
+                tb.Text = "Record Custom…";
             _onHotkeyChanged();
             e.Handled = true;
         }

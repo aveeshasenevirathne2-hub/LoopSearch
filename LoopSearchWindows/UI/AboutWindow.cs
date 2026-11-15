@@ -11,17 +11,12 @@ public sealed class AboutWindow : Window
 {
     public AboutWindow()
     {
-        LiquidGlassUI.ConfigureWindowChrome(this, 420, 340, "About LoopSearch");
-
-        var rootGrid = new Grid();
-        rootGrid.Children.Add(new HorizonBackgroundView());
-
         var stack = new StackPanel
         {
             Spacing = 10,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(24)
+            Margin = new Thickness(24, 4, 24, 24)
         };
 
         var badge = LiquidGlassUI.CreateBrandBadge(68);
@@ -52,11 +47,11 @@ public sealed class AboutWindow : Window
             Foreground = ThemePalette.SecondaryBrush
         });
 
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 6, 0, 0) };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 8, 0, 0) };
         row.Children.Add(LiquidGlassUI.CreateGlassButton("GitHub Repo", () =>
         {
             Process.Start(new ProcessStartInfo($"https://github.com/{AppSettings.GitHubRepo}") { UseShellExecute = true });
-        }));
+        }, iconPath: LiquidGlassIcons.ExternalArrow));
         row.Children.Add(LiquidGlassUI.CreatePrimaryButton("Check Updates", async () =>
         {
             var upd = await AppUpdateChecker.CheckForUpdatesAsync();
@@ -72,8 +67,7 @@ public sealed class AboutWindow : Window
         }));
         stack.Children.Add(row);
 
-        rootGrid.Children.Add(stack);
-        Content = rootGrid;
-        Opened += (_, _) => LiquidGlassUI.AnimateWindowEntrance(this, stack);
+        var shell = LiquidGlassUI.WrapBorderlessGlassShell(this, 430, 320, "About LoopSearch", stack, showTitleInBar: false);
+        Opened += (_, _) => AppleMotion.AnimateWindowEntrance(this, shell);
     }
 }

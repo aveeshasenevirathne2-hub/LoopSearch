@@ -18,12 +18,7 @@ public sealed class FeedbackWindow : Window
 
     public FeedbackWindow()
     {
-        LiquidGlassUI.ConfigureWindowChrome(this, 500, 460, "Rate & Suggest Feature");
-
-        var rootGrid = new Grid();
-        rootGrid.Children.Add(new HorizonBackgroundView());
-
-        var stack = new StackPanel { Spacing = 14, Margin = new Thickness(24, 20) };
+        var stack = new StackPanel { Spacing = 14, Margin = new Thickness(24, 6, 24, 22) };
 
         stack.Children.Add(new TextBlock
         {
@@ -40,14 +35,14 @@ public sealed class FeedbackWindow : Window
             Foreground = ThemePalette.SecondaryBrush
         });
 
-        // Stars
+        // Vector Stars (zero emoji variation!)
         var starRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         for (int i = 0; i < 5; i++)
         {
             int idx = i + 1;
             var b = new Button
             {
-                Content = new TextBlock { Text = "★", FontSize = 22 },
+                Content = LiquidGlassIcons.FillIcon(LiquidGlassIcons.Star, 22, new SolidColorBrush(Color.Parse("#FFB84D"))),
                 Background = Brushes.Transparent,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(4),
@@ -60,13 +55,11 @@ public sealed class FeedbackWindow : Window
         stack.Children.Add(starRow);
         UpdateStars();
 
-        // Equal-width category pills (matches macOS fix!)
         string[] cats = ["Feature Request", "Bug Report", "UI & Motion", "Search Quality"];
         var catGrid = new UniformGrid { Columns = 2, Rows = 2 };
         for (int i = 0; i < cats.Length; i++)
         {
             string cat = cats[i];
-            int idx = i;
             var b = new Button
             {
                 Content = new TextBlock { Text = cat, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center },
@@ -90,7 +83,7 @@ public sealed class FeedbackWindow : Window
             Watermark = "Describe your idea or issue…",
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
-            Height = 115,
+            Height = 110,
             FontSize = 12.5
         };
         stack.Children.Add(messageBox);
@@ -104,20 +97,19 @@ public sealed class FeedbackWindow : Window
             var url = $"https://github.com/{AppSettings.GitHubRepo}/issues/new?title={title}&body={body}";
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
             Close();
-        }));
+        }, iconPath: LiquidGlassIcons.ExternalArrow));
         stack.Children.Add(footer);
 
-        rootGrid.Children.Add(LiquidGlassUI.CreateGlassCard(stack, padding: new Thickness(0), radius: 0));
-        Content = rootGrid;
-        Opened += (_, _) => LiquidGlassUI.AnimateWindowEntrance(this, stack);
+        var shell = LiquidGlassUI.WrapBorderlessGlassShell(this, 500, 445, "Rate & Suggest Feature", stack, showTitleInBar: false);
+        Opened += (_, _) => AppleMotion.AnimateWindowEntrance(this, shell);
     }
 
     private void UpdateStars()
     {
         for (int i = 0; i < 5; i++)
         {
-            if (_stars[i].Content is TextBlock tb)
-                tb.Foreground = i < _rating ? new SolidColorBrush(Color.Parse("#FFB84D")) : ThemePalette.MutedBrush;
+            if (_stars[i].Content is Avalonia.Controls.Shapes.Path p)
+                p.Fill = i < _rating ? new SolidColorBrush(Color.Parse("#FFB84D")) : ThemePalette.MutedBrush;
         }
     }
 
