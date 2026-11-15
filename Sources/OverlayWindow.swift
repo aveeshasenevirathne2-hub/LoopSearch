@@ -887,6 +887,7 @@ private final class OverlayCanvasView: NSView {
         twinkleContainer.opacity = selectionRect == nil ? starAlpha : (settings.showAmbientStars ? 0.55 : 0.0)
         ambientSparkleEmitter.opacity = selectionRect == nil ? ambientAlpha : (settings.showAmbientStars ? 0.55 : 0.0)
         CATransaction.commit()
+        resultsSheet?.syncWebViewAppearance()
     }
 
     override func viewDidChangeBackingProperties() {
@@ -1589,8 +1590,11 @@ private final class OverlayCanvasView: NSView {
             ctx.duration = exitDuration
             ctx.timingFunction = AppleMotion.easeIn
             self.animator().alphaValue = 0.0
-        }, completionHandler: {
-            Task { @MainActor in
+        }, completionHandler: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.resultsSheet?.prepareForClose()
+                self?.bgLayer.contents = nil
+                self?.selectionPopLayer.contents = nil
                 completion()
             }
         })
@@ -3222,6 +3226,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
     private var engineButton: LiquidGlassButton!
     private var backButton: LiquidGlassButton!
+    private var webThemeButton: LiquidGlassButton!
     private var moreButton: LiquidGlassButton!
     private var topBarStack: NSStackView!
     private var heroRightStackRef: NSStackView!
@@ -3265,6 +3270,11 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         if !dark {
             return """
             (function() {
+                if (window.__ctsThemeObserver) {
+                    window.__ctsThemeObserver.disconnect();
+                    window.__ctsThemeObserver = null;
+                }
+                window.__ctsDarkEnabled = false;
                 var st = document.getElementById('cts-dark-theme-style');
                 if (st) st.remove();
                 document.documentElement.style.colorScheme = 'light';
@@ -3273,6 +3283,12 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                     bgEls[i].style.removeProperty('background-color');
                     bgEls[i].style.removeProperty('border-color');
                     bgEls[i].removeAttribute('data-cts-dark-bg');
+                }
+                var imgEls = document.querySelectorAll('[data-cts-dark-bgi]');
+                for (var k = 0; k < imgEls.length; k++) {
+                    imgEls[k].style.removeProperty('background-image');
+                    imgEls[k].style.removeProperty('background');
+                    imgEls[k].removeAttribute('data-cts-dark-bgi');
                 }
                 var fgEls = document.querySelectorAll('[data-cts-dark-fg]');
                 for (var j = 0; j < fgEls.length; j++) {
@@ -3285,6 +3301,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         return """
         (function() {
             if (location.pathname.indexOf('/sorry') === 0) return;
+            window.__ctsDarkEnabled = true;
             document.documentElement.style.colorScheme = 'dark';
             var st = document.getElementById('cts-dark-theme-style');
             if (!st) {
@@ -3294,59 +3311,100 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                     :root, html, body {
                         color-scheme: dark !important;
                         background-color: #090e1a !important;
-                        color: #e8eef7 !important;
+                        color: #edf2fb !important;
+                    }
+                    input, textarea {
+                        background-color: rgba(18, 28, 46, 0.92) !important;
+                        color: #edf2fb !important;
+                        caret-color: #5cb8ff !important;
+                        border-color: rgba(130, 175, 255, 0.24) !important;
+                    }
+                    input::placeholder, textarea::placeholder {
+                        color: #93a7c4 !important;
                     }
                     a, a * { color: #7cc4ff !important; }
-                    svg { color: #9fc5f8; }
+                    svg { color: #a8caf5; }
                 `;
                 (document.head || document.documentElement).appendChild(st);
             }
-            var nodes = document.querySelectorAll('body, main, section, article, aside, nav, div, ul, li, g-card, c-wiz, [role="tabpanel"], [role="dialog"], [role="button"], button, span, p, h1, h2, h3, h4');
-            for (var i = 0; i < nodes.length; i++) {
-                var el = nodes[i];
-                if (el.tagName === 'IMG' || el.tagName === 'VIDEO' || el.tagName === 'CANVAS') continue;
-                var cs = window.getComputedStyle(el);
-                var bg = cs.backgroundColor;
-                if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
-                    var m = bg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?\\)/);
-                    if (m) {
-                        var r = +m[1], g = +m[2], b = +m[3], a = m[4] !== undefined ? +m[4] : 1;
-                        if (a > 0.2 && r > 180 && g > 180 && b > 180) {
-                            var isRoot = (el.tagName === 'BODY' || el.tagName === 'MAIN');
-                            el.style.setProperty('background-color', isRoot ? '#090e1a' : 'rgba(17, 25, 42, 0.90)', 'important');
-                            el.style.setProperty('border-color', 'rgba(130, 175, 255, 0.16)', 'important');
-                            el.setAttribute('data-cts-dark-bg', '1');
+            function applyDarkPass() {
+                if (!window.__ctsDarkEnabled) return;
+                var nodes = document.querySelectorAll('body, main, section, article, aside, nav, div, ul, li, g-card, c-wiz, [role="tabpanel"], [role="dialog"], [role="button"], button, span, p, h1, h2, h3, h4, strong, b, em, li');
+                for (var i = 0; i < nodes.length; i++) {
+                    var el = nodes[i];
+                    if (el.tagName === 'IMG' || el.tagName === 'VIDEO' || el.tagName === 'CANVAS') continue;
+                    var cs = window.getComputedStyle(el);
+                    var bgi = cs.backgroundImage;
+                    if (bgi && bgi.indexOf('gradient(') !== -1 && /(255|248|249|250|241|243|244|238|232|229)/.test(bgi)) {
+                        var hasMaskBg = (el.textContent || '').trim().length < 36 || el.querySelector('img') === null;
+                        if (hasMaskBg) {
+                            el.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(9, 14, 26, 0), rgba(9, 14, 26, 0.96))', 'important');
+                            el.setAttribute('data-cts-dark-bgi', '1');
+                        }
+                    }
+                    var bg = cs.backgroundColor;
+                    if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+                        var m = bg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?\\)/);
+                        if (m) {
+                            var r = +m[1], g = +m[2], b = +m[3], a = m[4] !== undefined ? +m[4] : 1;
+                            if (a > 0.16 && r > 170 && g > 170 && b > 170) {
+                                var isRoot = (el.tagName === 'BODY' || el.tagName === 'MAIN');
+                                el.style.setProperty('background-color', isRoot ? '#090e1a' : 'rgba(17, 25, 42, 0.92)', 'important');
+                                el.style.setProperty('border-color', 'rgba(130, 175, 255, 0.16)', 'important');
+                                el.setAttribute('data-cts-dark-bg', '1');
+                            }
+                        }
+                    }
+                    var fg = cs.color;
+                    if (fg) {
+                        var fm = fg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+                        if (fm) {
+                            var fr = +fm[1], fgv = +fm[2], fb = +fm[3];
+                            if (Math.max(fr, fgv, fb) < 168) {
+                                var isSecondary = Math.min(fr, fgv, fb) > 78;
+                                el.style.setProperty('color', isSecondary ? '#b6c7df' : '#edf2fb', 'important');
+                                el.setAttribute('data-cts-dark-fg', '1');
+                            }
                         }
                     }
                 }
-                var fg = cs.color;
-                if (fg) {
-                    var fm = fg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
-                    if (fm) {
-                        var fr = +fm[1], fgv = +fm[2], fb = +fm[3];
-                        if (fr < 115 && fgv < 115 && fb < 115) {
-                            el.style.setProperty('color', (fr > 65 && fgv > 65) ? '#a3b6d0' : '#eaf1fb', 'important');
-                            el.setAttribute('data-cts-dark-fg', '1');
-                        }
-                    }
-                }
+            }
+            applyDarkPass();
+            if (!window.__ctsThemeObserver && document.body) {
+                var queued = false;
+                window.__ctsThemeObserver = new MutationObserver(function() {
+                    if (!window.__ctsDarkEnabled || queued) return;
+                    queued = true;
+                    requestAnimationFrame(function() {
+                        queued = false;
+                        applyDarkPass();
+                    });
+                });
+                window.__ctsThemeObserver.observe(document.body, { childList: true, subtree: true });
             }
         })();
         """
     }
 
     private var isEffectiveDarkMode: Bool {
-        switch AppSettings.shared.theme {
+        switch AppSettings.shared.webResultsTheme {
         case .dark:
             return true
         case .light:
             return false
         case .system:
-            return effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            switch AppSettings.shared.theme {
+            case .dark:
+                return true
+            case .light:
+                return false
+            case .system:
+                return effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            }
         }
     }
 
-    private func syncWebViewAppearance() {
+    func syncWebViewAppearance() {
         guard webView != nil else { return }
         let dark = isEffectiveDarkMode
         webView.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
@@ -3354,10 +3412,39 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         webView.underPageBackgroundColor = dark
             ? NSColor(red: 0.035, green: 0.055, blue: 0.10, alpha: 1.0)
             : NSColor(white: 0.98, alpha: 1.0)
+        updateWebThemeButtonUI(dark: dark)
 
         if let current = webView.url, current.host?.contains("google.") == true, !current.path.hasPrefix("/sorry") {
             webView.evaluateJavaScript(Self.webColorSchemeScript(dark: dark), completionHandler: nil)
         }
+    }
+
+    private func updateWebThemeButtonUI(dark: Bool) {
+        guard webThemeButton != nil else { return }
+        let mode = AppSettings.shared.webResultsTheme
+        let symbol: String
+        switch mode {
+        case .system:
+            symbol = "circle.lefthalf.filled"
+        case .dark:
+            symbol = "moon.fill"
+        case .light:
+            symbol = "sun.max.fill"
+        }
+        webThemeButton.updateSymbol(symbol, pointSize: 10.5, weight: .medium)
+        webThemeButton.toolTip = "Web Results Mode: \(mode.title) (\(dark ? "Dark" : "Light")) — Click to switch"
+    }
+
+    func prepareForClose() {
+        loadingFallbackTask?.cancel()
+        aiStreamingTask?.cancel()
+        stopLoaderAnimations()
+        webView?.stopLoading()
+        webView?.evaluateJavaScript(
+            "if(window.__ctsThemeObserver){window.__ctsThemeObserver.disconnect();window.__ctsThemeObserver=null;}",
+            completionHandler: nil
+        )
+        webView?.loadHTMLString("", baseURL: nil)
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -3743,6 +3830,12 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         }
         copyBtn.setAccessibilityLabel("Copy Text or Image")
 
+        webThemeButton = makeGlassCircleButton(symbol: "circle.lefthalf.filled", pointSize: 10.5, weight: .medium, tooltip: "Switch Web Results Light/Dark Mode") { [weak self] in
+            self?.cycleWebResultsTheme()
+        }
+        webThemeButton.setAccessibilityLabel("Switch Web Results Theme")
+        updateWebThemeButtonUI(dark: isEffectiveDarkMode)
+
         moreButton = makeGlassCircleButton(symbol: "ellipsis", pointSize: 11.5, weight: .bold, tooltip: "More Actions (Sticker, Save, Expand, Browser)") { [weak self] in
             self?.showMoreActionsMenu()
         }
@@ -3756,6 +3849,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         let actionsGroup = LiquidGlassGroupView(spacing: 4)
         actionsGroup.stackView.addArrangedSubview(pinBtn)
         actionsGroup.stackView.addArrangedSubview(copyBtn)
+        actionsGroup.stackView.addArrangedSubview(webThemeButton)
         actionsGroup.stackView.addArrangedSubview(moreButton)
         actionsGroup.stackView.addArrangedSubview(closeBtn)
 
@@ -4830,6 +4924,21 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         engineParent.submenu = engineSubmenu
         menu.addItem(engineParent)
 
+        let webThemeSubmenu = NSMenu(title: "Web Results Mode")
+        for mode in AppTheme.allCases {
+            let title = (mode == .system) ? "Auto (Match App)" : mode.title
+            let item = NSMenuItem(title: title, action: #selector(handleSelectWebThemeFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.state = (AppSettings.shared.webResultsTheme == mode) ? .on : .off
+            item.image = NSImage(systemSymbolName: mode.symbolName, accessibilityDescription: nil)
+            webThemeSubmenu.addItem(item)
+        }
+        let webThemeParent = NSMenuItem(title: "Web Results Theme", action: nil, keyEquivalent: "")
+        webThemeParent.image = NSImage(systemSymbolName: "circle.lefthalf.filled", accessibilityDescription: nil)
+        webThemeParent.submenu = webThemeSubmenu
+        menu.addItem(webThemeParent)
+
         let pt = NSPoint(x: 0, y: moreButton.bounds.height + 4)
         menu.popUp(positioning: nil, at: pt, in: moreButton)
     }
@@ -4846,6 +4955,26 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         guard let raw = sender.representedObject as? String,
               let engine = SearchEngine(rawValue: raw) else { return }
         switchToSearchEngine(engine)
+    }
+
+    @objc private func handleSelectWebThemeFromMenu(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = AppTheme(rawValue: raw) else { return }
+        applyWebResultsTheme(mode)
+    }
+
+    private func cycleWebResultsTheme() {
+        let all = AppTheme.allCases
+        let current = AppSettings.shared.webResultsTheme
+        let nextIdx = ((all.firstIndex(of: current) ?? 0) + 1) % all.count
+        applyWebResultsTheme(all[nextIdx])
+    }
+
+    private func applyWebResultsTheme(_ mode: AppTheme) {
+        AppSettings.shared.webResultsTheme = mode
+        syncWebViewAppearance()
+        let label = (mode == .system) ? "Auto (\(isEffectiveDarkMode ? "Dark" : "Light"))" : "\(mode.title) Mode"
+        onShowToast("Results browser: \(label)")
     }
 
     private func showLoadingOverlay(status: String) {

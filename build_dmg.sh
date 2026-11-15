@@ -24,14 +24,14 @@ MOUNT_DIR="$WORK_DIR/mnt"
 BG_PNG="$WORK_DIR/dmg-bg.png"
 
 cleanup() {
-    if mount | grep -q "on $MOUNT_DIR "; then
+    if [[ -n "${MOUNT_DIR:-}" ]] && mount | grep -q "on $MOUNT_DIR "; then
         hdiutil detach -force "$MOUNT_DIR" >/dev/null 2>&1 || true
     fi
     rm -rf "$WORK_DIR"
 }
 trap cleanup EXIT
 
-mkdir -p "$STAGE_DIR/.background" "$MOUNT_DIR"
+mkdir -p "$STAGE_DIR/.background"
 
 echo "Generating branded DMG installer artwork..."
 swift "$SCRIPT_DIR/Resources/generate_dmg_bg.swift" "$BG_PNG"
@@ -56,39 +56,42 @@ hdiutil create \
     -size "${SIZE_KB}k" \
     "$RW_DMG" >/dev/null
 
-hdiutil attach "$RW_DMG" \
-    -mountpoint "$MOUNT_DIR" \
-    -readwrite \
-    -noverify \
-    -noautoopen >/dev/null
+ATTACH_OUT="$(hdiutil attach "$RW_DMG" -readwrite -noverify -noautoopen)"
+MOUNT_DIR="$(printf '%s\n' "$ATTACH_OUT" | awk '/\/Volumes\//{print substr($0, index($0, "/Volumes/"))}' | head -n 1)"
+if [[ -z "$MOUNT_DIR" || ! -d "$MOUNT_DIR" ]]; then
+    echo "Error: Failed to locate mounted DMG volume under /Volumes." >&2
+    exit 1
+fi
+DISK_NAME="$(basename "$MOUNT_DIR")"
 
 chflags hidden "$MOUNT_DIR/.background" "$MOUNT_DIR/.fseventsd" "$MOUNT_DIR/.Trashes" >/dev/null 2>&1 || true
 
-# Apply Finder window layout (bounds, Retina background, large icons) when Finder GUI is available
+# Apply Finder window layout (bounds, Retina background, large icons) using the mounted /Volumes disk
 if osascript >/dev/null 2>&1 <<EOF
 tell application "Finder"
-    set dmgFolder to (POSIX file "$MOUNT_DIR") as alias
-    open dmgFolder
-    delay 1
-    set win to container window of dmgFolder
-    set current view of win to icon view
-    set toolbar visible of win to false
-    set statusbar visible of win to false
-    set the bounds of win to {200, 140, 860, 588}
-    set viewOpts to the icon view options of win
-    set arrangement of viewOpts to not arranged
-    set icon size of viewOpts to 116
-    set text size of viewOpts to 13
-    set background picture of viewOpts to file ".background:dmg-bg.png" of dmgFolder
-    set position of item "LoopSearch.app" of win to {175, 222}
-    set position of item "Applications" of win to {485, 222}
-    update dmgFolder without registering applications
-    delay 1
-    close win
+    tell disk "$DISK_NAME"
+        open
+        delay 1
+        set win to container window
+        set current view of win to icon view
+        set toolbar visible of win to false
+        set statusbar visible of win to false
+        set the bounds of win to {200, 140, 860, 588}
+        set viewOpts to the icon view options of win
+        set arrangement of viewOpts to not arranged
+        set icon size of viewOpts to 116
+        set text size of viewOpts to 13
+        set background picture of viewOpts to file ".background:dmg-bg.png"
+        set position of item "LoopSearch.app" of win to {175, 222}
+        set position of item "Applications" of win to {485, 222}
+        update without registering applications
+        delay 1
+        close
+    end tell
 end tell
 EOF
 then
-    echo "Applied branded Finder installer layout."
+    echo "Applied branded Finder installer layout ($DISK_NAME)."
 else
     echo "Warning: Finder GUI layout skipped (headless/non-interactive session); DMG structure & symlink remain intact."
 fi

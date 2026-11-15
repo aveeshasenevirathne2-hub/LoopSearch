@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     nonisolated(unsafe) private var settingsObserver: NSObjectProtocol?
     nonisolated(unsafe) private var reopenHistoryObserver: NSObjectProtocol?
     nonisolated(unsafe) private var authObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var guideClosedObserver: NSObjectProtocol?
 
     private var selectionMode: SelectionMode {
         get { AppSettings.shared.selectionMode }
@@ -164,6 +165,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 AppUpdateChecker.shared.checkForUpdates(interactive: false)
             }
         }
+
+        guideClosedObserver = NotificationCenter.default.addObserver(
+            forName: .loopSearchGuideClosed,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let place = AppSettings.shared.hideDockIcon ? "top-right Menu Bar" : "Dock & Menu Bar"
+                self.toastController.show(
+                    message: "LoopSearch stays running in your \(place) — press \(AppSettings.shared.activeHotkeyDisplayString)",
+                    duration: 3.4
+                )
+            }
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard !isOverlayOpen else { return true }
+        if !flag {
+            if !FirebaseAuthService.shared.isSignedIn || !AppSettings.shared.hasCompletedOnboarding {
+                openOnboarding()
+            } else {
+                openSettings()
+            }
+        }
+        return true
     }
 
     deinit {
@@ -175,6 +203,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if let authObserver {
             NotificationCenter.default.removeObserver(authObserver)
+        }
+        if let guideClosedObserver {
+            NotificationCenter.default.removeObserver(guideClosedObserver)
         }
     }
 
@@ -207,6 +238,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         triggerItem.target = self
         menu.addItem(triggerItem)
+
+        let clipboardItem = NSMenuItem(
+            title: "Search Clipboard Image…",
+            action: #selector(searchClipboardImage),
+            keyEquivalent: ""
+        )
+        clipboardItem.target = self
+        menu.addItem(clipboardItem)
 
         if let session = FirebaseAuthService.shared.session {
             let accountMenu = NSMenu()
@@ -296,6 +335,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         engineRoot.submenu = engineMenu
         menu.addItem(engineRoot)
 
+        // Results Browser Mode submenu (Auto / Dark / Light)
+        let currentWebTheme = AppSettings.shared.webResultsTheme
+        let webThemeMenu = NSMenu()
+        for themeOption in AppTheme.allCases {
+            let label = themeOption == .system ? "Auto (Match App)" : themeOption.title
+            let item = NSMenuItem(
+                title: label,
+                action: #selector(selectWebResultsTheme(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = themeOption.rawValue
+            item.state = (currentWebTheme == themeOption) ? .on : .off
+            webThemeMenu.addItem(item)
+        }
+        let webThemeRoot = NSMenuItem(title: "Results Browser (\(currentWebTheme.title))", action: nil, keyEquivalent: "")
+        webThemeRoot.submenu = webThemeMenu
+        menu.addItem(webThemeRoot)
+
         // Capture History submenu
         let historyItems = CaptureHistoryStore.shared.items
         let historyMenu = NSMenu()
@@ -376,6 +434,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(disclaimerItem)
 
         menu.addItem(.separator())
+
+        let dockVisibleItem = NSMenuItem(
+            title: "Keep Icon in Dock",
+            action: #selector(toggleKeepDockIcon),
+            keyEquivalent: ""
+        )
+        dockVisibleItem.target = self
+        dockVisibleItem.state = AppSettings.shared.hideDockIcon ? .off : .on
+        menu.addItem(dockVisibleItem)
 
         let hasScreenPerm = ScreenCaptureService.hasPermission
         let screenPermItem = NSMenuItem(
@@ -458,6 +525,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toastController.show(message: "Default search engine: \(engine.title)")
     }
 
+    @objc private func selectWebResultsTheme(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let theme = AppTheme(rawValue: raw) else { return }
+        AppSettings.shared.webResultsTheme = theme
+        rebuildMenu()
+        toastController.show(message: "Results browser theme: \(theme.title)")
+    }
+
+    @objc private func toggleKeepDockIcon() {
+        let shouldHide = !AppSettings.shared.hideDockIcon
+        AppSettings.shared.hideDockIcon = shouldHide
+        rebuildMenu()
+        toastController.show(
+            message: shouldHide ? "Dock icon hidden — find LoopSearch in Menu Bar" : "Dock icon visible",
+            duration: 2.6
+        )
+    }
+
+    @objc private func searchClipboardImage() {
+        guard ensureSignedInOrPrompt() else { return }
+        let pb = NSPasteboard.general
+        guard let nsImage = NSImage(pasteboard: pb) else {
+            toastController.show(message: "Copy an image or screenshot to clipboard first", duration: 2.8)
+            return
+        }
+        var rect = NSRect(origin: .zero, size: nsImage.size)
+        guard let cgImage = nsImage.cgImage(forProposedRect: &rect, context: nil, hints: nil) else {
+            toastController.show(message: "Clipboard does not contain a readable image", duration: 2.8)
+            return
+        }
+        let screen = ScreenCaptureService.activeScreen()
+        Task { [weak self] in
+            guard let self else { return }
+            let bg: CGImage
+            if ScreenCaptureService.hasPermission,
+               let live = try? await ScreenCaptureService.captureScreen(screen) {
+                bg = live
+            } else if let ambient = self.makeAmbientBackdrop(for: screen) {
+                bg = ambient
+            } else {
+                bg = cgImage
+            }
+            let selectionRect = self.centeredOverlayRect(for: cgImage, on: screen)
+            self.presentOverlay(screenshot: bg, screen: screen, initialSelection: (image: cgImage, rect: selectionRect))
+        }
+    }
+
     @objc private func reopenHistoryCapture(_ sender: NSMenuItem) {
         reopenHistoryEntry(at: sender.tag)
     }
@@ -472,36 +586,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             do {
                 let bg = try await ScreenCaptureService.captureScreen(screen)
-                let w = min(max(180, CGFloat(entry.cgImage.width) * 0.5), screen.frame.width * 0.45)
-                let h = min(max(120, CGFloat(entry.cgImage.height) * 0.5), screen.frame.height * 0.35)
-                let rect = CGRect(
-                    x: screen.frame.width * 0.5 - w * 0.5,
-                    y: screen.frame.height * 0.22,
-                    width: w,
-                    height: h
-                )
-                self.isOverlayOpen = true
-                self.overlayController.show(
-                    screenshot: bg,
-                    screen: screen,
-                    selectionMode: self.selectionMode,
-                    initialSelection: (image: entry.cgImage, rect: rect),
-                    onShowToast: { [weak self] msg in
-                        self?.toastController.show(message: msg, duration: 2.6)
-                    },
-                    onOpenSettings: { [weak self] in
-                        Task { @MainActor [weak self] in
-                            self?.openSettings()
-                        }
-                    },
-                    onClose: { [weak self] in
-                        self?.handleOverlayClosed()
-                    }
-                )
+                let rect = self.centeredOverlayRect(for: entry.cgImage, on: screen)
+                self.presentOverlay(screenshot: bg, screen: screen, initialSelection: (image: entry.cgImage, rect: rect))
             } catch {
                 self.showPermissionAlert(error: error)
             }
         }
+    }
+
+    private func centeredOverlayRect(for image: CGImage, on screen: NSScreen) -> CGRect {
+        let w = min(max(180, CGFloat(image.width) * 0.5), screen.frame.width * 0.45)
+        let h = min(max(120, CGFloat(image.height) * 0.5), screen.frame.height * 0.35)
+        return CGRect(
+            x: screen.frame.width * 0.5 - w * 0.5,
+            y: screen.frame.height * 0.22,
+            width: w,
+            height: h
+        )
+    }
+
+    private func presentOverlay(
+        screenshot: CGImage,
+        screen: NSScreen,
+        initialSelection: (image: CGImage, rect: CGRect)? = nil
+    ) {
+        isOverlayOpen = true
+        overlayController.show(
+            screenshot: screenshot,
+            screen: screen,
+            selectionMode: selectionMode,
+            initialSelection: initialSelection,
+            onShowToast: { [weak self] msg in
+                self?.toastController.show(message: msg, duration: 2.6)
+            },
+            onOpenSettings: { [weak self] in
+                Task { @MainActor [weak self] in
+                    self?.openSettings()
+                }
+            },
+            onClose: { [weak self] in
+                self?.handleOverlayClosed()
+            }
+        )
+    }
+
+    private func makeAmbientBackdrop(for screen: NSScreen) -> CGImage? {
+        let scale = screen.backingScaleFactor
+        let w = max(640, Int(screen.frame.width * scale))
+        let h = max(480, Int(screen.frame.height * scale))
+        guard let ctx = CGContext(
+            data: nil,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        let colors = [
+            CGColor(red: 0.04, green: 0.06, blue: 0.12, alpha: 1),
+            CGColor(red: 0.08, green: 0.15, blue: 0.28, alpha: 1)
+        ] as CFArray
+        if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
+            ctx.drawLinearGradient(
+                grad,
+                start: CGPoint(x: 0, y: CGFloat(h)),
+                end: CGPoint(x: CGFloat(w), y: 0),
+                options: []
+            )
+        }
+        return ctx.makeImage()
     }
 
     @objc private func clearCaptureHistory() {
@@ -537,23 +691,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             do {
                 let image = try await ScreenCaptureService.captureScreen(screen)
-                self.isOverlayOpen = true
-                self.overlayController.show(
-                    screenshot: image,
-                    screen: screen,
-                    selectionMode: self.selectionMode,
-                    onShowToast: { [weak self] msg in
-                        self?.toastController.show(message: msg, duration: 2.6)
-                    },
-                    onOpenSettings: { [weak self] in
-                        Task { @MainActor [weak self] in
-                            self?.openSettings()
-                        }
-                    },
-                    onClose: { [weak self] in
-                        self?.handleOverlayClosed()
-                    }
-                )
+                self.presentOverlay(screenshot: image, screen: screen)
             } catch {
                 self.showPermissionAlert(error: error)
             }

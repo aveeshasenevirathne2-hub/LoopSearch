@@ -186,6 +186,48 @@ enum AppleMotion {
         layer.opacity = 1.0
         layer.add(fade, forKey: "\(key)_fade")
     }
+
+    static func staggeredCardsReveal(
+        _ views: [NSView],
+        baseDelay: TimeInterval = 0.03,
+        stepDelay: TimeInterval = 0.04
+    ) {
+        let reduced = AppSettings.shared.effectiveReduceMotion
+        for (idx, v) in views.enumerated() {
+            v.wantsLayer = true
+            guard let layer = v.layer else { continue }
+            if reduced {
+                layer.opacity = 1.0
+                layer.transform = CATransform3DIdentity
+                continue
+            }
+            let delay = baseDelay + Double(idx) * stepDelay
+            let b = v.bounds.width > 1 ? v.bounds : CGRect(x: 0, y: 0, width: 420, height: 68)
+            let startXform = centeredTransform(bounds: b, scale: 0.96, translation: CGPoint(x: 0, y: -10))
+            let now = CACurrentMediaTime()
+            let springAnim = spring(
+                keyPath: "transform",
+                from: startXform,
+                to: CATransform3DIdentity,
+                dampingRatio: 0.84,
+                response: 0.40
+            )
+            springAnim.beginTime = now + delay
+            springAnim.fillMode = .backwards
+            layer.transform = CATransform3DIdentity
+            layer.add(springAnim, forKey: "staggerReveal")
+
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 0.0
+            fade.toValue = 1.0
+            fade.duration = duration(0.24)
+            fade.beginTime = now + delay
+            fade.fillMode = .backwards
+            fade.timingFunction = easeOut
+            layer.opacity = 1.0
+            layer.add(fade, forKey: "staggerRevealFade")
+        }
+    }
 }
 
 /// 2D rubber-band clamping and exponential momentum settling for floating Liquid Glass surfaces.
@@ -435,6 +477,16 @@ final class HorizonLightWellView: NSView {
         updateLayers()
     }
 
+    override func viewDidHide() {
+        super.viewDidHide()
+        updateWaveAnimations()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        updateWaveAnimations()
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
@@ -628,8 +680,9 @@ final class HorizonLightWellView: NSView {
     }
 
     private func updateWaveAnimations() {
+        let isVisibleInWindow = (window?.isVisible == true) && !isHiddenOrHasHiddenAncestor
         let shouldAnimate = (continuousWaveEnabled || isSearchPulseActive)
-            && window != nil
+            && isVisibleInWindow
             && !AppSettings.shared.effectiveReduceMotion
             && (intensity > 0.015 || isSearchPulseActive)
 
@@ -1075,6 +1128,8 @@ final class LiquidGlassSurfaceView: NSView {
     private var nativeGlassView: NSView?
     private var fallbackBlurView: NSVisualEffectView?
     private var fallbackTintLayer: CALayer?
+    private var fallbackSheenLayer: CAGradientLayer?
+    private var fallbackSpecularLayer: CAGradientLayer?
     private var specularBorderLayer: CAShapeLayer?
     private let useNativeGlass: Bool
 
@@ -1140,11 +1195,15 @@ final class LiquidGlassSurfaceView: NSView {
                 ])
                 nativeGlassView = glass
             } else {
+                // High-craft macOS 14/15 glass parity: continuous squircle, behind-window vibrancy,
+                // curved top optical sheen, and multi-stop specular rim matching macOS 26 Liquid Glass.
                 let blur = NSVisualEffectView()
-                blur.material = (glassStyle == .regular) ? .popover : .hudWindow
+                blur.material = (glassStyle == .regular) ? .hudWindow : .popover
+                blur.blendingMode = .behindWindow
                 blur.state = .active
                 blur.wantsLayer = true
                 blur.layer?.cornerRadius = cornerRadius
+                blur.layer?.cornerCurve = .continuous
                 blur.layer?.masksToBounds = true
                 blur.translatesAutoresizingMaskIntoConstraints = false
                 addSubview(blur)
@@ -1158,14 +1217,28 @@ final class LiquidGlassSurfaceView: NSView {
                 let tintLayer = CALayer()
                 tintLayer.backgroundColor = (tint ?? .clear).cgColor
                 tintLayer.cornerRadius = cornerRadius
+                tintLayer.cornerCurve = .continuous
                 blur.layer?.addSublayer(tintLayer)
                 fallbackTintLayer = tintLayer
 
+                let sheen = CAGradientLayer()
+                sheen.startPoint = CGPoint(x: 0.5, y: 1.0)
+                sheen.endPoint = CGPoint(x: 0.5, y: 0.0)
+                sheen.cornerRadius = cornerRadius
+                sheen.cornerCurve = .continuous
+                blur.layer?.addSublayer(sheen)
+                fallbackSheenLayer = sheen
+
+                let specGrad = CAGradientLayer()
+                specGrad.startPoint = CGPoint(x: 0.5, y: 1.0)
+                specGrad.endPoint = CGPoint(x: 0.5, y: 0.0)
                 let rim = CAShapeLayer()
                 rim.fillColor = nil
-                rim.strokeColor = NSColor.white.withAlphaComponent(0.24).cgColor
-                rim.lineWidth = 0.85
-                blur.layer?.addSublayer(rim)
+                rim.strokeColor = NSColor.white.cgColor
+                rim.lineWidth = 1.0
+                specGrad.mask = rim
+                blur.layer?.addSublayer(specGrad)
+                fallbackSpecularLayer = specGrad
                 specularBorderLayer = rim
 
                 contentContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -1177,6 +1250,7 @@ final class LiquidGlassSurfaceView: NSView {
                     contentContainer.bottomAnchor.constraint(equalTo: blur.bottomAnchor)
                 ])
                 fallbackBlurView = blur
+                updateFallbackOpticalGlassAppearance()
             }
         } else {
             let tintLayer = CALayer()
@@ -1320,6 +1394,7 @@ final class LiquidGlassSurfaceView: NSView {
     }
 
     private func applyAdaptiveTint() {
+        updateFallbackOpticalGlassAppearance()
         guard adaptiveDarkTint != nil || adaptiveLightTint != nil else { return }
         let resolved: NSColor? = isDarkAppearance
             ? adaptiveDarkTint
@@ -1328,6 +1403,38 @@ final class LiquidGlassSurfaceView: NSView {
             glass.tintColor = resolved
         }
         fallbackTintLayer?.backgroundColor = (resolved ?? .clear).cgColor
+    }
+
+    private func updateFallbackOpticalGlassAppearance() {
+        guard fallbackBlurView != nil else { return }
+        let dark = isDarkAppearance
+        fallbackBlurView?.material = dark ? .hudWindow : .popover
+
+        fallbackSheenLayer?.colors = dark
+            ? [
+                NSColor.white.withAlphaComponent(0.11).cgColor,
+                NSColor.white.withAlphaComponent(0.03).cgColor,
+                NSColor.clear.cgColor
+            ]
+            : [
+                NSColor.white.withAlphaComponent(0.46).cgColor,
+                NSColor.white.withAlphaComponent(0.14).cgColor,
+                NSColor.clear.cgColor
+            ]
+        fallbackSheenLayer?.locations = [0.0, 0.24, 0.56]
+
+        fallbackSpecularLayer?.colors = dark
+            ? [
+                NSColor(red: 0.88, green: 0.94, blue: 1.0, alpha: 0.36).cgColor,
+                NSColor.white.withAlphaComponent(0.10).cgColor,
+                NSColor(red: 0.36, green: 0.80, blue: 1.0, alpha: 0.22).cgColor
+            ]
+            : [
+                NSColor.white.withAlphaComponent(0.84).cgColor,
+                NSColor.white.withAlphaComponent(0.32).cgColor,
+                NSColor(red: 0.45, green: 0.72, blue: 1.0, alpha: 0.34).cgColor
+            ]
+        fallbackSpecularLayer?.locations = [0.0, 0.48, 1.0]
     }
 
     override func layout() {
@@ -1340,14 +1447,24 @@ final class LiquidGlassSurfaceView: NSView {
             fallbackTintLayer.frame = bounds
             fallbackTintLayer.cornerRadius = cornerRadius
         }
+        if let fallbackSheenLayer {
+            fallbackSheenLayer.frame = bounds
+            fallbackSheenLayer.cornerRadius = cornerRadius
+        }
+        if let fallbackSpecularLayer {
+            fallbackSpecularLayer.frame = bounds
+        }
         if let rim = specularBorderLayer {
             rim.frame = bounds
-            rim.path = CGPath(
-                roundedRect: bounds.insetBy(dx: 0.45, dy: 0.45),
-                cornerWidth: cornerRadius,
-                cornerHeight: cornerRadius,
-                transform: nil
-            )
+            let inset = bounds.insetBy(dx: 0.5, dy: 0.5)
+            rim.path = (inset.width > 1 && inset.height > 1)
+                ? CGPath(
+                    roundedRect: inset,
+                    cornerWidth: max(0, cornerRadius - 0.5),
+                    cornerHeight: max(0, cornerRadius - 0.5),
+                    transform: nil
+                )
+                : nil
         }
         CATransaction.commit()
     }

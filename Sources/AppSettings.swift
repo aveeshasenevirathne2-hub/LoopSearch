@@ -237,6 +237,7 @@ extension Notification.Name {
     static let circleToSearchSettingsChanged = Notification.Name("CircleToSearchSettingsChanged")
     static let circleToSearchHistoryChanged = Notification.Name("CircleToSearchHistoryChanged")
     static let circleToSearchReopenHistory = Notification.Name("CircleToSearchReopenHistory")
+    static let loopSearchGuideClosed = Notification.Name("LoopSearchGuideClosed")
 }
 
 // MARK: - Private Encrypted Local Vault (User-only 0o700/0o600, avoids login Keychain prompts)
@@ -467,6 +468,7 @@ final class AppSettings {
         static let selectionMode = "selection_mode"
         static let searchEngine = "search_engine"
         static let appTheme = "app_theme"
+        static let webResultsTheme = "web_results_theme"
         static let visualStyle = "visual_style_preset"
         static let glowColorTheme = "glow_color_theme"
         static let glowIntensity = "glow_intensity"
@@ -507,6 +509,14 @@ final class AppSettings {
         didSet {
             defaults.set(theme.rawValue, forKey: Keys.appTheme)
             applyAppAppearance()
+            notifyChanged()
+        }
+    }
+
+    /// Controls embedded browser results appearance (`system` = Auto-detect App/macOS Dark/Light mode).
+    var webResultsTheme: AppTheme {
+        didSet {
+            defaults.set(webResultsTheme.rawValue, forKey: Keys.webResultsTheme)
             notifyChanged()
         }
     }
@@ -733,6 +743,13 @@ final class AppSettings {
             self.theme = .system
         }
 
+        if let raw = defaults.string(forKey: Keys.webResultsTheme),
+           let loadedWebTheme = AppTheme(rawValue: raw) {
+            self.webResultsTheme = loadedWebTheme
+        } else {
+            self.webResultsTheme = .system
+        }
+
         if let raw = defaults.string(forKey: Keys.visualStyle),
            let preset = VisualStylePreset(rawValue: raw) {
             self.visualStyle = preset
@@ -783,7 +800,7 @@ final class AppSettings {
         if defaults.object(forKey: Keys.hideDockIcon) != nil {
             self.hideDockIcon = defaults.bool(forKey: Keys.hideDockIcon)
         } else {
-            self.hideDockIcon = true
+            self.hideDockIcon = false
         }
 
         if defaults.object(forKey: Keys.autoCheckForUpdates) != nil {
@@ -813,6 +830,7 @@ final class AppSettings {
         selectionMode = .rectangle
         searchEngine = .googleLens
         theme = .system
+        webResultsTheme = .system
         visualStyle = .balanced
         glowColorTheme = .signature
         glowIntensity = .luminous
@@ -820,7 +838,7 @@ final class AppSettings {
         showAmbientStars = true
         showInlineOCR = true
         reduceMotion = false
-        hideDockIcon = true
+        hideDockIcon = false
         autoCheckForUpdates = true
         hotkeyPreset = .cmdShiftSpace
     }
@@ -1095,7 +1113,7 @@ final class AppUpdateChecker {
     private var progressPanel: UpdateProgressWindow?
 
     static var currentVersion: String {
-        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.2"
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.3"
     }
 
     private struct GitHubRelease: Decodable {

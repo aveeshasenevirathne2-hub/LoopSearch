@@ -1101,7 +1101,7 @@ final class FirebaseAuthService {
     // MARK: - Firestore REST Telemetry & Offline Queue
 
     private func makeTelemetryEvent(uid: String, eventType: String) -> PendingTelemetryEvent {
-        let appVer = String((Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.2").prefix(40))
+        let appVer = String((Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.3").prefix(40))
         let osVerInfo = ProcessInfo.processInfo.operatingSystemVersion
         let osVer = String("macOS \(osVerInfo.majorVersion).\(osVerInfo.minorVersion).\(osVerInfo.patchVersion)".prefix(60))
         return PendingTelemetryEvent(

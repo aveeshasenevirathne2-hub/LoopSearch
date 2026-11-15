@@ -75,6 +75,31 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 }
 
+@MainActor
+private enum ShortcutCaptureResult {
+    case cancelled
+    case modifierOnly
+    case missingModifiers
+    case captured(keyCode: UInt32, carbonModifiers: UInt32, displayString: String)
+
+    static func parse(_ event: NSEvent) -> ShortcutCaptureResult {
+        if event.keyCode == 53 {
+            return .cancelled
+        }
+        let ignoredKeyCodes: Set<UInt16> = [54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+        if ignoredKeyCodes.contains(event.keyCode) {
+            return .modifierOnly
+        }
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard !flags.isEmpty else {
+            return .missingModifiers
+        }
+        let carbonMods = HotkeyManager.carbonModifiers(from: flags)
+        let label = HotkeyManager.formatShortcut(keyCode: UInt32(event.keyCode), carbonModifiers: carbonMods)
+        return .captured(keyCode: UInt32(event.keyCode), carbonModifiers: carbonMods, displayString: label)
+    }
+}
+
 private final class SettingsKeyCaptureWindow: NSWindow {
     var onKeyDown: ((NSEvent) -> Bool)?
 
@@ -220,6 +245,7 @@ private final class SettingsContentView: NSView {
     private var ocrToggle: LiquidGlassToggle!
 
     private var themeSegment: LiquidGlassSegmentedControl!
+    private var webThemeSegment: LiquidGlassSegmentedControl!
     private var styleSegment: LiquidGlassSegmentedControl!
     private var paletteSegment: LiquidGlassSegmentedControl!
     private var starsToggle: LiquidGlassToggle!
@@ -314,6 +340,9 @@ private final class SettingsContentView: NSView {
 
         if let idx = AppTheme.allCases.firstIndex(of: s.theme) {
             themeSegment.setSelectedIndex(idx, animated: false)
+        }
+        if let idx = AppTheme.allCases.firstIndex(of: s.webResultsTheme) {
+            webThemeSegment.setSelectedIndex(idx, animated: false)
         }
         if let idx = VisualStylePreset.allCases.firstIndex(of: s.visualStyle) {
             styleSegment.setSelectedIndex(idx, animated: false)
@@ -611,6 +640,22 @@ private final class SettingsContentView: NSView {
             title: "Appearance Theme",
             subtitle: "Follow macOS system setting or force Dark / Light glass",
             control: themeSegment,
+            to: mainStack
+        )
+
+        webThemeSegment = LiquidGlassSegmentedControl(
+            options: themeOptions,
+            selectedIndex: AppTheme.allCases.firstIndex(of: settings.webResultsTheme) ?? 0,
+            height: 28,
+            compact: true
+        ) { idx in
+            guard AppTheme.allCases.indices.contains(idx) else { return }
+            AppSettings.shared.webResultsTheme = AppTheme.allCases[idx]
+        }
+        addRow(
+            title: "Results Browser Theme",
+            subtitle: "Auto-match macOS/App theme or force Dark / Light Google Lens page",
+            control: webThemeSegment,
             to: mainStack
         )
 
@@ -1465,6 +1510,21 @@ private final class SettingsContentView: NSView {
             self?.refreshFromSettings()
         }
 
+        let copyDiagBtn = LiquidGlassButton(
+            symbol: "doc.on.doc",
+            symbolPointSize: 10.5,
+            symbolWeight: .medium,
+            title: "Copy Diagnostics",
+            tooltip: "Copy non-personal app & macOS diagnostics for support",
+            height: 25,
+            minWidth: 124,
+            style: .clear,
+            foregroundColor: .secondaryLabelColor,
+            font: .systemFont(ofSize: 11, weight: .medium)
+        ) { [weak self] in
+            self?.copyDiagnosticsToPasteboard()
+        }
+
         let clearHistBtn = LiquidGlassButton(
             symbol: "trash",
             symbolPointSize: 10.5,
@@ -1483,10 +1543,11 @@ private final class SettingsContentView: NSView {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let bottomActions = NSStackView(views: [privacyLine, spacer, resetBtn, clearHistBtn])
+        let bottomActions = NSStackView(views: [copyDiagBtn, spacer, resetBtn, clearHistBtn])
         bottomActions.orientation = .horizontal
         bottomActions.alignment = .centerY
         bottomActions.spacing = 8
+        vStack.addArrangedSubview(privacyLine)
         vStack.addArrangedSubview(bottomActions)
         bottomActions.widthAnchor.constraint(equalTo: vStack.widthAnchor).isActive = true
 
@@ -1512,36 +1573,64 @@ private final class SettingsContentView: NSView {
         refreshHotkeyUI()
     }
 
+    private func copyDiagnosticsToPasteboard() {
+        let s = AppSettings.shared
+        let ver = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? AppUpdateChecker.currentVersion
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        let os = ProcessInfo.processInfo.operatingSystemVersionString
+        let screenPerm = CGPreflightScreenCaptureAccess() ? "Granted" : "Not Granted"
+        let arch: String = {
+            #if arch(arm64)
+            return "arm64"
+            #elseif arch(x86_64)
+            return "x86_64"
+            #else
+            return "unknown"
+            #endif
+        }()
+        let report = """
+        LoopSearch Diagnostics
+        Version: \(ver) (build \(build)) [\(arch)]
+        macOS: \(os)
+        Screen Recording: \(screenPerm)
+        Hotkey: \(s.activeHotkeyDisplayString) (custom=\(s.useCustomHotkey))
+        App Theme: \(s.theme.rawValue) | Web Results Theme: \(s.webResultsTheme.rawValue)
+        Selection Mode: \(s.selectionMode.rawValue) | Engine: \(s.searchEngine.rawValue)
+        Dock Icon: \(s.hideDockIcon ? "Hidden" : "Visible") | Launch at Login: \(s.launchAtLogin)
+        Signed In: \(FirebaseAuthService.shared.isSignedIn)
+        """
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(report, forType: .string)
+        hotkeyValueLabel.stringValue = "Copied Diagnostics ✓"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
+            guard let self, !self.isRecordingShortcut else { return }
+            self.hotkeyValueLabel.stringValue = AppSettings.shared.activeHotkeyDisplayString
+        }
+    }
+
     func handleCapturedKeyEvent(_ event: NSEvent) -> Bool {
         guard isRecordingShortcut else { return false }
 
-        if event.keyCode == 53 {
+        switch ShortcutCaptureResult.parse(event) {
+        case .cancelled:
             cancelShortcutRecording()
             return true
-        }
-
-        let ignoredKeyCodes: Set<UInt16> = [54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
-        if ignoredKeyCodes.contains(event.keyCode) {
+        case .modifierOnly:
             return true
-        }
-
-        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
-        guard !flags.isEmpty else {
+        case .missingModifiers:
             NSSound.beep()
             return true
+        case .captured(let keyCode, let carbonMods, let label):
+            isRecordingShortcut = false
+            AppSettings.shared.setCustomHotkey(
+                keyCode: keyCode,
+                carbonModifiers: carbonMods,
+                displayString: label
+            )
+            refreshHotkeyUI()
+            return true
         }
-
-        let carbonMods = HotkeyManager.carbonModifiers(from: flags)
-        let label = HotkeyManager.formatShortcut(keyCode: UInt32(event.keyCode), carbonModifiers: carbonMods)
-
-        isRecordingShortcut = false
-        AppSettings.shared.setCustomHotkey(
-            keyCode: UInt32(event.keyCode),
-            carbonModifiers: carbonMods,
-            displayString: label
-        )
-        refreshHotkeyUI()
-        return true
     }
 
     private func refreshHotkeyUI() {
@@ -1577,20 +1666,25 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     static let shared = OnboardingWindowController()
 
     private var window: NSWindow?
+    private weak var contentViewRef: OnboardingContentView?
+    private var didLaunchOverlay = false
 
     func dismiss() {
+        didLaunchOverlay = true
         window?.close()
     }
 
     func show(onStartOverlay: (() -> Void)? = nil) {
+        didLaunchOverlay = false
         if let existing = window {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+            contentViewRef?.refreshAllState(animateCards: true)
             return
         }
 
-        let rect = NSRect(x: 0, y: 0, width: 516, height: 632)
-        let win = NSWindow(
+        let rect = NSRect(x: 0, y: 0, width: 556, height: 704)
+        let win = SettingsKeyCaptureWindow(
             contentRect: rect,
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
@@ -1617,21 +1711,36 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
                             _ = await FirebaseAuthService.shared.signInWithGoogle()
                         }
                     } else {
+                        self?.didLaunchOverlay = false
                         self?.window?.close()
                     }
                     return
                 }
                 AppSettings.shared.hasCompletedOnboarding = true
+                self?.didLaunchOverlay = tryNow
                 self?.window?.close()
                 if tryNow {
                     onStartOverlay?()
                 }
             }
         )
+        win.onKeyDown = { [weak content] event in
+            content?.handleCapturedKeyEvent(event) ?? false
+        }
+        self.contentViewRef = content
         win.contentView = content
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         self.window = win
+        content.animateCardsIn()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        contentViewRef?.stopTransientActivity()
+        if !didLaunchOverlay {
+            NotificationCenter.default.post(name: .loopSearchGuideClosed, object: nil)
+        }
+        didLaunchOverlay = false
     }
 }
 
@@ -1642,15 +1751,28 @@ private final class OnboardingContentView: NSView {
     private var authSubtitleLabel: NSTextField!
     private var authActionBtn: LiquidGlassButton!
     private var permStatusLabel: NSTextField!
+    private var permGrantBtn: LiquidGlassButton!
+    private var hotkeyValueLabel: NSTextField!
+    private var recordHotkeyBtn: LiquidGlassButton!
+    private var hotkeyHintLabel: NSTextField!
+    private var presetButtons: [HotkeyPreset: LiquidGlassButton] = [:]
+    private var appThemeSegment: LiquidGlassSegmentedControl!
+    private var webThemeSegment: LiquidGlassSegmentedControl!
+    private var keepDockToggle: LiquidGlassToggle!
+    private var loginToggle: LiquidGlassToggle!
+    private var stepCards: [NSView] = []
     private var doneBtn: LiquidGlassButton!
     private var tryBtn: LiquidGlassButton!
+    private var isRecordingShortcut = false
+    nonisolated(unsafe) private var permPollTimer: Timer?
     nonisolated(unsafe) private var authObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var settingsObserver: NSObjectProtocol?
 
     init(frame frameRect: NSRect, onFinish: @escaping (Bool) -> Void) {
         self.onFinish = onFinish
         super.init(frame: frameRect)
         setupUI()
-        refreshAuthStep()
+        refreshAllState(animateCards: false)
         authObserver = NotificationCenter.default.addObserver(
             forName: .loopSearchAuthChanged,
             object: nil,
@@ -1660,16 +1782,103 @@ private final class OnboardingContentView: NSView {
                 self?.refreshAuthStep()
             }
         }
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: .circleToSearchSettingsChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshShortcutUI()
+                self?.refreshAppearanceAndBehaviorUI()
+            }
+        }
+        startPermissionPollingIfNeeded()
     }
 
     deinit {
+        permPollTimer?.invalidate()
         if let authObserver {
             NotificationCenter.default.removeObserver(authObserver)
+        }
+        if let settingsObserver {
+            NotificationCenter.default.removeObserver(settingsObserver)
         }
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func animateCardsIn() {
+        AppleMotion.staggeredCardsReveal(stepCards, baseDelay: 0.03, stepDelay: 0.042)
+    }
+
+    func stopTransientActivity() {
+        isRecordingShortcut = false
+        permPollTimer?.invalidate()
+        permPollTimer = nil
+        refreshShortcutUI()
+    }
+
+    func refreshAllState(animateCards: Bool) {
+        refreshAuthStep()
+        refreshPermissionStatus()
+        refreshShortcutUI()
+        refreshAppearanceAndBehaviorUI()
+        startPermissionPollingIfNeeded()
+        if animateCards {
+            animateCardsIn()
+        }
+    }
+
+    func handleCapturedKeyEvent(_ event: NSEvent) -> Bool {
+        guard isRecordingShortcut else { return false }
+
+        switch ShortcutCaptureResult.parse(event) {
+        case .cancelled:
+            isRecordingShortcut = false
+            refreshShortcutUI()
+            return true
+        case .modifierOnly:
+            return true
+        case .missingModifiers:
+            NSSound.beep()
+            return true
+        case .captured(let keyCode, let carbonMods, let label):
+            isRecordingShortcut = false
+            AppSettings.shared.setCustomHotkey(
+                keyCode: keyCode,
+                carbonModifiers: carbonMods,
+                displayString: label
+            )
+            refreshShortcutUI()
+            return true
+        }
+    }
+
+    private func startPermissionPollingIfNeeded() {
+        guard !CGPreflightScreenCaptureAccess() else {
+            permPollTimer?.invalidate()
+            permPollTimer = nil
+            return
+        }
+        guard permPollTimer == nil else { return }
+        permPollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshPermissionStatus()
+            }
+        }
+    }
+
+    private func refreshPermissionStatus() {
+        let granted = CGPreflightScreenCaptureAccess()
+        permStatusLabel.stringValue = granted ? "✓ Granted" : "Needs Access"
+        permStatusLabel.textColor = granted ? .systemGreen : .systemOrange
+        permGrantBtn.title = granted ? "Open Settings" : "Grant Access"
+        if granted {
+            permPollTimer?.invalidate()
+            permPollTimer = nil
+        }
     }
 
     private func setupUI() {
@@ -1690,15 +1899,15 @@ private final class OnboardingContentView: NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
+        stack.spacing = 9
         stack.translatesAutoresizingMaskIntoConstraints = false
         card.contentContainer.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: card.contentContainer.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: card.contentContainer.trailingAnchor, constant: -24),
-            stack.topAnchor.constraint(equalTo: card.contentContainer.topAnchor, constant: 24),
-            stack.bottomAnchor.constraint(equalTo: card.contentContainer.bottomAnchor, constant: -20)
+            stack.leadingAnchor.constraint(equalTo: card.contentContainer.leadingAnchor, constant: 22),
+            stack.trailingAnchor.constraint(equalTo: card.contentContainer.trailingAnchor, constant: -22),
+            stack.topAnchor.constraint(equalTo: card.contentContainer.topAnchor, constant: 20),
+            stack.bottomAnchor.constraint(equalTo: card.contentContainer.bottomAnchor, constant: -16)
         ])
 
         // Header
@@ -1766,96 +1975,293 @@ private final class OnboardingContentView: NSView {
         stack.addArrangedSubview(step1)
         step1.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        // Step 2: Screen Recording Permission
-        let step2 = makeStepCard(
-            number: "2",
-            title: "Grant Screen Recording Permission",
-            subtitle: "Required so LoopSearch can capture the region you circle or box."
-        ) {
-            let granted = CGPreflightScreenCaptureAccess()
-            permStatusLabel = NSTextField(labelWithString: granted ? "✓ Granted" : "Needs Access")
-            permStatusLabel.font = .systemFont(ofSize: 11, weight: .semibold)
-            permStatusLabel.textColor = granted ? .systemGreen : .systemOrange
+        // Step 2: Screen Recording Permission (with Quit & Reopen Dock/Menu Bar tip + live poll)
+        let step2 = makeSettingsGlassCard(cornerRadius: 14)
+        let step2Badge = makeStepBadge(number: "2")
+        let step2Title = NSTextField(labelWithString: "Grant Screen Recording Permission")
+        step2Title.font = .systemFont(ofSize: 13, weight: .semibold)
+        step2Title.textColor = .labelColor
 
-            let grantBtn = LiquidGlassButton(
-                symbol: "lock.open.display",
-                symbolPointSize: 10.5,
-                symbolWeight: .semibold,
-                title: granted ? "Open Settings" : "Grant Access",
-                tooltip: "Request Screen Recording permission",
-                height: 26,
-                minWidth: 108,
-                style: .clear,
-                tintColor: NSColor(red: 0.08, green: 0.36, blue: 0.82, alpha: 0.84),
-                lightTintColor: NSColor(red: 0.12, green: 0.44, blue: 0.94, alpha: 0.90),
-                foregroundColor: .white,
-                font: .systemFont(ofSize: 11, weight: .semibold)
-            ) { [weak self] in
-                let ok = CGRequestScreenCaptureAccess()
-                self?.permStatusLabel.stringValue = ok ? "✓ Granted" : "Check System Settings"
-                self?.permStatusLabel.textColor = ok ? .systemGreen : .systemOrange
-                if !ok, let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                    NSWorkspace.shared.open(url)
-                }
+        let step2Sub = NSTextField(wrappingLabelWithString: "Needed to capture your screen. If macOS asks to Quit & Reopen, find LoopSearch in your Dock or top-right Menu Bar.")
+        step2Sub.font = .systemFont(ofSize: 10.5, weight: .regular)
+        step2Sub.textColor = .secondaryLabelColor
+        step2Sub.maximumNumberOfLines = 2
+        step2Sub.preferredMaxLayoutWidth = 278
+
+        let step2TextCol = NSStackView(views: [step2Title, step2Sub])
+        step2TextCol.orientation = .vertical
+        step2TextCol.alignment = .leading
+        step2TextCol.spacing = 2
+        step2TextCol.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        step2TextCol.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let granted = CGPreflightScreenCaptureAccess()
+        permStatusLabel = NSTextField(labelWithString: granted ? "✓ Granted" : "Needs Access")
+        permStatusLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        permStatusLabel.textColor = granted ? .systemGreen : .systemOrange
+
+        permGrantBtn = LiquidGlassButton(
+            symbol: "lock.open.display",
+            symbolPointSize: 10.5,
+            symbolWeight: .semibold,
+            title: granted ? "Open Settings" : "Grant Access",
+            tooltip: "Request Screen Recording permission",
+            height: 26,
+            minWidth: 108,
+            style: .clear,
+            tintColor: NSColor(red: 0.08, green: 0.36, blue: 0.82, alpha: 0.84),
+            lightTintColor: NSColor(red: 0.12, green: 0.44, blue: 0.94, alpha: 0.90),
+            foregroundColor: .white,
+            font: .systemFont(ofSize: 11, weight: .semibold)
+        ) { [weak self] in
+            let ok = CGRequestScreenCaptureAccess()
+            self?.refreshPermissionStatus()
+            self?.startPermissionPollingIfNeeded()
+            if !ok, let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                NSWorkspace.shared.open(url)
             }
-
-            let row = NSStackView(views: [permStatusLabel, grantBtn])
-            row.orientation = .horizontal
-            row.alignment = .centerY
-            row.spacing = 8
-            return row
         }
+
+        let permRightRow = NSStackView(views: [permStatusLabel, permGrantBtn])
+        permRightRow.orientation = .horizontal
+        permRightRow.alignment = .centerY
+        permRightRow.spacing = 8
+
+        let step2Spacer = NSView()
+        step2Spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let step2Row = NSStackView(views: [step2Badge, step2TextCol, step2Spacer, permRightRow])
+        step2Row.orientation = .horizontal
+        step2Row.alignment = .centerY
+        step2Row.spacing = 10
+        step2Row.translatesAutoresizingMaskIntoConstraints = false
+        step2.contentContainer.addSubview(step2Row)
+        NSLayoutConstraint.activate([
+            step2Row.leadingAnchor.constraint(equalTo: step2.contentContainer.leadingAnchor, constant: 14),
+            step2Row.trailingAnchor.constraint(equalTo: step2.contentContainer.trailingAnchor, constant: -14),
+            step2Row.topAnchor.constraint(equalTo: step2.contentContainer.topAnchor, constant: 10),
+            step2Row.bottomAnchor.constraint(equalTo: step2.contentContainer.bottomAnchor, constant: -10)
+        ])
         stack.addArrangedSubview(step2)
         step2.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        // Step 3: Global Shortcut
-        let step3 = makeStepCard(
-            number: "3",
-            title: "Choose Global Shortcut",
-            subtitle: "Press from any app to start selecting immediately."
-        ) {
-            let presets: [HotkeyPreset] = [.cmdShiftSpace, .optionSpace, .cmdShiftS]
-            let options = presets.map { LiquidGlassSegmentedControl.Option(title: $0.title) }
-            let initialIdx = presets.firstIndex(of: AppSettings.shared.hotkeyPreset) ?? 0
-            return LiquidGlassSegmentedControl(
-                options: options,
-                selectedIndex: initialIdx,
-                height: 26,
-                compact: true
-            ) { idx in
-                guard presets.indices.contains(idx) else { return }
-                AppSettings.shared.hotkeyPreset = presets[idx]
+        // Step 3: Global Shortcut (Presets + Record Custom Key Combo right on start)
+        let step3 = makeSettingsGlassCard(cornerRadius: 14)
+        let step3Badge = makeStepBadge(number: "3")
+        let step3Title = NSTextField(labelWithString: "Choose or Record Global Shortcut")
+        step3Title.font = .systemFont(ofSize: 13, weight: .semibold)
+        step3Title.textColor = .labelColor
+
+        hotkeyHintLabel = NSTextField(labelWithString: "Pick a quick preset or record your own key combo from start.")
+        hotkeyHintLabel.font = .systemFont(ofSize: 10.5, weight: .regular)
+        hotkeyHintLabel.textColor = .secondaryLabelColor
+        hotkeyHintLabel.lineBreakMode = .byTruncatingTail
+
+        let step3TextCol = NSStackView(views: [step3Title, hotkeyHintLabel])
+        step3TextCol.orientation = .vertical
+        step3TextCol.alignment = .leading
+        step3TextCol.spacing = 1
+        step3TextCol.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        step3TextCol.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let badgePill = NSView()
+        badgePill.wantsLayer = true
+        badgePill.layer?.cornerRadius = 8
+        badgePill.layer?.backgroundColor = NSColor(red: 0.14, green: 0.56, blue: 1.0, alpha: 0.14).cgColor
+        badgePill.layer?.borderWidth = 0.75
+        badgePill.layer?.borderColor = NSColor(red: 0.34, green: 0.84, blue: 1.0, alpha: 0.34).cgColor
+        badgePill.translatesAutoresizingMaskIntoConstraints = false
+
+        hotkeyValueLabel = NSTextField(labelWithString: AppSettings.shared.activeHotkeyDisplayString)
+        hotkeyValueLabel.font = .monospacedSystemFont(ofSize: 11.5, weight: .semibold)
+        hotkeyValueLabel.textColor = .labelColor
+        hotkeyValueLabel.alignment = .center
+        hotkeyValueLabel.translatesAutoresizingMaskIntoConstraints = false
+        badgePill.addSubview(hotkeyValueLabel)
+        NSLayoutConstraint.activate([
+            badgePill.heightAnchor.constraint(equalToConstant: 24),
+            badgePill.widthAnchor.constraint(greaterThanOrEqualToConstant: 82),
+            hotkeyValueLabel.leadingAnchor.constraint(equalTo: badgePill.leadingAnchor, constant: 9),
+            hotkeyValueLabel.trailingAnchor.constraint(equalTo: badgePill.trailingAnchor, constant: -9),
+            hotkeyValueLabel.centerYAnchor.constraint(equalTo: badgePill.centerYAnchor)
+        ])
+
+        let step3HeaderSpacer = NSView()
+        step3HeaderSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let step3TopRow = NSStackView(views: [step3Badge, step3TextCol, step3HeaderSpacer, badgePill])
+        step3TopRow.orientation = .horizontal
+        step3TopRow.alignment = .centerY
+        step3TopRow.spacing = 10
+
+        presetButtons = [:]
+        let presetList: [HotkeyPreset] = [.cmdShiftSpace, .optionSpace, .cmdShiftS]
+        let presetBtns: [LiquidGlassButton] = presetList.map { preset in
+            let btn = LiquidGlassButton(
+                title: preset.title,
+                tooltip: "Use \(preset.title)",
+                height: 24,
+                style: .clear,
+                foregroundColor: .labelColor,
+                font: .systemFont(ofSize: 10.5, weight: .semibold)
+            ) { [weak self] in
+                self?.isRecordingShortcut = false
+                AppSettings.shared.hotkeyPreset = preset
+                self?.refreshShortcutUI()
             }
+            presetButtons[preset] = btn
+            return btn
         }
+
+        recordHotkeyBtn = LiquidGlassButton(
+            symbol: "keyboard",
+            symbolPointSize: 10.5,
+            symbolWeight: .semibold,
+            title: "Record Custom…",
+            tooltip: "Press your own custom key combination (e.g. ⌥S, ⌃⌥Space)",
+            height: 24,
+            minWidth: 122,
+            style: .clear,
+            tintColor: NSColor(red: 0.08, green: 0.36, blue: 0.82, alpha: 0.84),
+            lightTintColor: NSColor(red: 0.12, green: 0.44, blue: 0.94, alpha: 0.90),
+            foregroundColor: .white,
+            font: .systemFont(ofSize: 10.5, weight: .semibold)
+        ) { [weak self] in
+            self?.toggleShortcutRecording()
+        }
+
+        let step3ControlsSpacer = NSView()
+        step3ControlsSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let step3ControlsRow = NSStackView(views: presetBtns + [step3ControlsSpacer, recordHotkeyBtn])
+        step3ControlsRow.orientation = .horizontal
+        step3ControlsRow.alignment = .centerY
+        step3ControlsRow.spacing = 6
+
+        let step3VStack = NSStackView(views: [step3TopRow, step3ControlsRow])
+        step3VStack.orientation = .vertical
+        step3VStack.alignment = .leading
+        step3VStack.spacing = 8
+        step3VStack.translatesAutoresizingMaskIntoConstraints = false
+        step3.contentContainer.addSubview(step3VStack)
+        NSLayoutConstraint.activate([
+            step3VStack.leadingAnchor.constraint(equalTo: step3.contentContainer.leadingAnchor, constant: 14),
+            step3VStack.trailingAnchor.constraint(equalTo: step3.contentContainer.trailingAnchor, constant: -14),
+            step3VStack.topAnchor.constraint(equalTo: step3.contentContainer.topAnchor, constant: 10),
+            step3VStack.bottomAnchor.constraint(equalTo: step3.contentContainer.bottomAnchor, constant: -10),
+            step3TopRow.widthAnchor.constraint(equalTo: step3VStack.widthAnchor),
+            step3ControlsRow.widthAnchor.constraint(equalTo: step3VStack.widthAnchor)
+        ])
         stack.addArrangedSubview(step3)
         step3.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        // Step 4: Theme & Style
-        let step4 = makeStepCard(
-            number: "4",
-            title: "Pick Your Theme",
-            subtitle: "Follow macOS appearance or lock Dark / Light glass."
-        ) {
-            let options = AppTheme.allCases.map {
-                LiquidGlassSegmentedControl.Option(title: $0.title, symbol: $0.symbolName)
-            }
-            let initialIdx = AppTheme.allCases.firstIndex(of: AppSettings.shared.theme) ?? 0
-            return LiquidGlassSegmentedControl(
-                options: options,
-                selectedIndex: initialIdx,
-                height: 26,
-                compact: true
-            ) { idx in
-                guard AppTheme.allCases.indices.contains(idx) else { return }
-                AppSettings.shared.theme = AppTheme.allCases[idx]
-            }
+        // Step 4: App Theme, Results Browser Mode & Quick Visibility Toggles
+        let step4 = makeSettingsGlassCard(cornerRadius: 14)
+        let step4Badge = makeStepBadge(number: "4")
+        let step4Title = NSTextField(labelWithString: "Appearance, Results Browser & Visibility")
+        step4Title.font = .systemFont(ofSize: 13, weight: .semibold)
+        step4Title.textColor = .labelColor
+
+        let step4Sub = NSTextField(labelWithString: "Choose Dark / Light mode for LoopSearch and Google Lens results, and keep icon accessible.")
+        step4Sub.font = .systemFont(ofSize: 10.5, weight: .regular)
+        step4Sub.textColor = .secondaryLabelColor
+        step4Sub.lineBreakMode = .byTruncatingTail
+
+        let step4TextCol = NSStackView(views: [step4Title, step4Sub])
+        step4TextCol.orientation = .vertical
+        step4TextCol.alignment = .leading
+        step4TextCol.spacing = 1
+        step4TextCol.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        step4TextCol.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let step4TopRow = NSStackView(views: [step4Badge, step4TextCol])
+        step4TopRow.orientation = .horizontal
+        step4TopRow.alignment = .centerY
+        step4TopRow.spacing = 10
+
+        let themeOptions = AppTheme.allCases.map {
+            LiquidGlassSegmentedControl.Option(title: $0.title, symbol: $0.symbolName)
         }
+
+        let appThemeLabel = NSTextField(labelWithString: "App & Glass Theme")
+        appThemeLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
+        appThemeLabel.textColor = .labelColor
+        appThemeSegment = LiquidGlassSegmentedControl(
+            options: themeOptions,
+            selectedIndex: AppTheme.allCases.firstIndex(of: AppSettings.shared.theme) ?? 0,
+            height: 24,
+            compact: true
+        ) { idx in
+            guard AppTheme.allCases.indices.contains(idx) else { return }
+            AppSettings.shared.theme = AppTheme.allCases[idx]
+        }
+        let appThemeSpacer = NSView()
+        appThemeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let appThemeRow = NSStackView(views: [appThemeLabel, appThemeSpacer, appThemeSegment])
+        appThemeRow.orientation = .horizontal
+        appThemeRow.alignment = .centerY
+
+        let webThemeLabel = NSTextField(labelWithString: "Results Browser Page")
+        webThemeLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
+        webThemeLabel.textColor = .labelColor
+        webThemeSegment = LiquidGlassSegmentedControl(
+            options: themeOptions,
+            selectedIndex: AppTheme.allCases.firstIndex(of: AppSettings.shared.webResultsTheme) ?? 0,
+            height: 24,
+            compact: true
+        ) { idx in
+            guard AppTheme.allCases.indices.contains(idx) else { return }
+            AppSettings.shared.webResultsTheme = AppTheme.allCases[idx]
+        }
+        let webThemeSpacer = NSView()
+        webThemeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let webThemeRow = NSStackView(views: [webThemeLabel, webThemeSpacer, webThemeSegment])
+        webThemeRow.orientation = .horizontal
+        webThemeRow.alignment = .centerY
+
+        keepDockToggle = LiquidGlassToggle(isOn: !AppSettings.shared.hideDockIcon) { isOn in
+            AppSettings.shared.hideDockIcon = !isOn
+        }
+        let keepDockLabel = NSTextField(labelWithString: "Keep in Dock (recommended)")
+        keepDockLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        keepDockLabel.textColor = .secondaryLabelColor
+
+        loginToggle = LiquidGlassToggle(isOn: AppSettings.shared.launchAtLogin) { isOn in
+            AppSettings.shared.launchAtLogin = isOn
+        }
+        let loginLabel = NSTextField(labelWithString: "Launch at Login")
+        loginLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        loginLabel.textColor = .secondaryLabelColor
+
+        let behaviorSpacer = NSView()
+        behaviorSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let behaviorRow = NSStackView(views: [keepDockToggle, keepDockLabel, behaviorSpacer, loginToggle, loginLabel])
+        behaviorRow.orientation = .horizontal
+        behaviorRow.alignment = .centerY
+        behaviorRow.spacing = 7
+
+        let step4VStack = NSStackView(views: [step4TopRow, appThemeRow, webThemeRow, behaviorRow])
+        step4VStack.orientation = .vertical
+        step4VStack.alignment = .leading
+        step4VStack.spacing = 7
+        step4VStack.translatesAutoresizingMaskIntoConstraints = false
+        step4.contentContainer.addSubview(step4VStack)
+        NSLayoutConstraint.activate([
+            step4VStack.leadingAnchor.constraint(equalTo: step4.contentContainer.leadingAnchor, constant: 14),
+            step4VStack.trailingAnchor.constraint(equalTo: step4.contentContainer.trailingAnchor, constant: -14),
+            step4VStack.topAnchor.constraint(equalTo: step4.contentContainer.topAnchor, constant: 10),
+            step4VStack.bottomAnchor.constraint(equalTo: step4.contentContainer.bottomAnchor, constant: -10),
+            step4TopRow.widthAnchor.constraint(equalTo: step4VStack.widthAnchor),
+            appThemeRow.widthAnchor.constraint(equalTo: step4VStack.widthAnchor),
+            webThemeRow.widthAnchor.constraint(equalTo: step4VStack.widthAnchor),
+            behaviorRow.widthAnchor.constraint(equalTo: step4VStack.widthAnchor)
+        ])
         stack.addArrangedSubview(step4)
         step4.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
         let supportCard = makeCreatorSupportCard(compact: true)
         stack.addArrangedSubview(supportCard)
         supportCard.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+
+        stepCards = [step1, step2, step3, step4, supportCard]
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -1951,16 +2357,56 @@ private final class OnboardingContentView: NSView {
         }
     }
 
-    private func makeStepCard(
-        number: String,
-        title: String,
-        subtitle: String,
-        subtitleLabelOut: ((NSTextField) -> Void)? = nil,
-        rightView: () -> NSView
-    ) -> NSView {
-        let card = makeSettingsGlassCard(cornerRadius: 14)
-        card.heightAnchor.constraint(equalToConstant: 70).isActive = true
+    private func toggleShortcutRecording() {
+        isRecordingShortcut.toggle()
+        if isRecordingShortcut {
+            recordHotkeyBtn.title = "Press keys… (Esc)"
+            recordHotkeyBtn.setSelectedAccent(true)
+            hotkeyValueLabel.stringValue = "Listening…"
+            hotkeyHintLabel.stringValue = "Hold ⌘/⌥/⌃/⇧ + a key (e.g. ⌥S). Press Esc to cancel."
+            hotkeyHintLabel.textColor = .systemCyan
+        } else {
+            refreshShortcutUI()
+        }
+    }
 
+    private func refreshShortcutUI() {
+        let s = AppSettings.shared
+        guard !isRecordingShortcut else { return }
+        hotkeyValueLabel.stringValue = s.activeHotkeyDisplayString
+        recordHotkeyBtn.title = "Record Custom…"
+        recordHotkeyBtn.setSelectedAccent(s.useCustomHotkey)
+
+        let activePreset = s.useCustomHotkey ? nil : s.hotkeyPreset
+        for (preset, btn) in presetButtons {
+            btn.setSelectedAccent(preset == activePreset)
+        }
+
+        if let warning = activePreset?.commonUsageWarning {
+            hotkeyHintLabel.stringValue = "Tip: \(warning)"
+            hotkeyHintLabel.textColor = .systemOrange
+        } else if s.useCustomHotkey {
+            hotkeyHintLabel.stringValue = "Custom shortcut active: \(s.activeHotkeyDisplayString) (click a preset to switch)"
+            hotkeyHintLabel.textColor = .secondaryLabelColor
+        } else {
+            hotkeyHintLabel.stringValue = "Pick a quick preset or record your own key combo from start."
+            hotkeyHintLabel.textColor = .secondaryLabelColor
+        }
+    }
+
+    private func refreshAppearanceAndBehaviorUI() {
+        let s = AppSettings.shared
+        if let idx = AppTheme.allCases.firstIndex(of: s.theme) {
+            appThemeSegment.setSelectedIndex(idx, animated: false)
+        }
+        if let idx = AppTheme.allCases.firstIndex(of: s.webResultsTheme) {
+            webThemeSegment.setSelectedIndex(idx, animated: false)
+        }
+        keepDockToggle.isOn = !s.hideDockIcon
+        loginToggle.isOn = s.launchAtLogin
+    }
+
+    private func makeStepBadge(number: String) -> NSView {
         let badge = NSView()
         badge.wantsLayer = true
         badge.layer?.cornerRadius = 12
@@ -1986,6 +2432,20 @@ private final class OnboardingContentView: NSView {
             badgeLabel.centerXAnchor.constraint(equalTo: badge.centerXAnchor),
             badgeLabel.centerYAnchor.constraint(equalTo: badge.centerYAnchor)
         ])
+        return badge
+    }
+
+    private func makeStepCard(
+        number: String,
+        title: String,
+        subtitle: String,
+        subtitleLabelOut: ((NSTextField) -> Void)? = nil,
+        rightView: () -> NSView
+    ) -> NSView {
+        let card = makeSettingsGlassCard(cornerRadius: 14)
+        card.heightAnchor.constraint(equalToConstant: 68).isActive = true
+
+        let badge = makeStepBadge(number: number)
 
         let tLabel = NSTextField(labelWithString: title)
         tLabel.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -2033,33 +2493,41 @@ final class HowToUseWindowController: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
     private var startOverlayHandler: (() -> Void)?
+    private var didLaunchOverlay = false
+    private weak var contentRef: HowToUseContentView?
 
     func show(justSignedIn: Bool = false, onStartOverlay: (() -> Void)? = nil) {
         if let onStartOverlay {
             self.startOverlayHandler = onStartOverlay
         }
+        didLaunchOverlay = false
 
         if let existing = window {
-            existing.contentView = HowToUseContentView(
+            let view = HowToUseContentView(
                 frame: existing.contentLayoutRect,
                 justSignedIn: justSignedIn,
                 onOpenStudio: { [weak self] in
+                    self?.didLaunchOverlay = true
                     self?.window?.close()
                     SettingsWindowController.shared.show()
                 },
                 onClose: { [weak self] tryNow in
+                    self?.didLaunchOverlay = tryNow
                     self?.window?.close()
                     if tryNow {
                         self?.startOverlayHandler?()
                     }
                 }
             )
+            existing.contentView = view
+            self.contentRef = view
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+            view.animateCardsIn()
             return
         }
 
-        let rect = NSRect(x: 0, y: 0, width: 540, height: 610)
+        let rect = NSRect(x: 0, y: 0, width: 540, height: 616)
         let win = NSWindow(
             contentRect: rect,
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -2078,23 +2546,36 @@ final class HowToUseWindowController: NSObject, NSWindowDelegate {
         win.delegate = self
         win.isReleasedWhenClosed = false
 
-        win.contentView = HowToUseContentView(
+        let view = HowToUseContentView(
             frame: rect,
             justSignedIn: justSignedIn,
             onOpenStudio: { [weak self] in
+                self?.didLaunchOverlay = true
                 self?.window?.close()
                 SettingsWindowController.shared.show()
             },
             onClose: { [weak self] tryNow in
+                self?.didLaunchOverlay = tryNow
                 self?.window?.close()
                 if tryNow {
                     self?.startOverlayHandler?()
                 }
             }
         )
+        win.contentView = view
+        self.contentRef = view
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         self.window = win
+        view.animateCardsIn()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        contentRef?.stopPolling()
+        if !didLaunchOverlay {
+            NotificationCenter.default.post(name: .loopSearchGuideClosed, object: nil)
+        }
+        didLaunchOverlay = false
     }
 }
 
@@ -2105,6 +2586,8 @@ private final class HowToUseContentView: NSView {
     private let onClose: (Bool) -> Void
     private var permissionBanner: NSView?
     private var permissionLabel: NSTextField?
+    private var guideCards: [NSView] = []
+    nonisolated(unsafe) private var permPollTimer: Timer?
 
     init(
         frame frameRect: NSRect,
@@ -2117,6 +2600,32 @@ private final class HowToUseContentView: NSView {
         self.onClose = onClose
         super.init(frame: frameRect)
         setupUI()
+        startPermissionPollingIfNeeded()
+    }
+
+    deinit {
+        permPollTimer?.invalidate()
+    }
+
+    func animateCardsIn() {
+        AppleMotion.staggeredCardsReveal(guideCards, baseDelay: 0.03, stepDelay: 0.042)
+    }
+
+    func stopPolling() {
+        permPollTimer?.invalidate()
+        permPollTimer = nil
+    }
+
+    private func startPermissionPollingIfNeeded() {
+        guard permissionBanner != nil, !CGPreflightScreenCaptureAccess() else { return }
+        permPollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard CGPreflightScreenCaptureAccess() else { return }
+                self?.permissionLabel?.stringValue = "✓ Screen Recording permission granted!"
+                self?.permissionLabel?.textColor = .systemGreen
+                self?.stopPolling()
+            }
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -2195,7 +2704,7 @@ private final class HowToUseContentView: NSView {
             (
                 "command.square.fill",
                 "1. Launch From Any App",
-                "Press \(hotkey) anywhere on your Mac, or click the LoopSearch icon in the top menu bar.",
+                "Press \(hotkey) anywhere, or click LoopSearch in your Dock or top-right menu bar.",
                 hotkey
             ),
             (
@@ -2212,12 +2721,13 @@ private final class HowToUseContentView: NSView {
             ),
             (
                 "slider.horizontal.3",
-                "4. Customize & Share Ideas",
-                "Press Esc anytime to cancel. Open LoopSearch Studio (⌘,) for themes, shortcuts, and Gemini AI setup.",
-                "Esc Cancel • ⌘, Studio"
+                "4. Always Accessible & Customizable",
+                "If windows close or Screen Recording asks to Quit & Reopen, LoopSearch stays in Dock & Menu Bar. Press ⌘, for Studio.",
+                "Dock • Menu Bar • ⌘,"
             )
         ]
 
+        guideCards = []
         for step in steps {
             let rowCard = makeGuideCard(
                 symbol: step.symbol,
@@ -2227,6 +2737,7 @@ private final class HowToUseContentView: NSView {
             )
             stack.addArrangedSubview(rowCard)
             rowCard.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            guideCards.append(rowCard)
         }
 
         // Optional Screen Recording Banner if not granted yet
@@ -2280,6 +2791,7 @@ private final class HowToUseContentView: NSView {
             self.permissionBanner = banner
             stack.addArrangedSubview(banner)
             banner.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            guideCards.append(banner)
         }
 
         let vSpacer = NSView()
@@ -2671,26 +3183,31 @@ final class FeedbackWindowController {
             starStack.bottomAnchor.constraint(equalTo: starCard.contentContainer.bottomAnchor, constant: -10)
         ])
 
-        // Category picker
+        // Category picker (equal width pills)
         categoryButtons = [:]
         let categories = ["Feature Idea", "App Rating", "Bug Report"]
         let catViews = categories.map { cat -> LiquidGlassButton in
             let btn = LiquidGlassButton(
                 title: cat,
-                height: 26,
+                height: 28,
                 style: .clear,
                 font: .systemFont(ofSize: 11, weight: .semibold)
             ) { [weak self] in
                 self?.selectedCategory = cat
                 self?.refreshUI()
             }
+            btn.setContentHuggingPriority(.defaultLow, for: .horizontal)
             categoryButtons[cat] = btn
             return btn
         }
         let catRow = NSStackView(views: catViews)
         catRow.orientation = .horizontal
         catRow.alignment = .centerY
+        catRow.distribution = .fillEqually
         catRow.spacing = 8
+        for idx in 1..<catViews.count {
+            catViews[idx].widthAnchor.constraint(equalTo: catViews[0].widthAnchor).isActive = true
+        }
 
         // Suggestion input box
         let inputCard = makeSettingsGlassCard(cornerRadius: 14)
@@ -2794,6 +3311,7 @@ final class FeedbackWindowController {
             root.topAnchor.constraint(equalTo: card.contentContainer.topAnchor, constant: 20),
             root.bottomAnchor.constraint(lessThanOrEqualTo: card.contentContainer.bottomAnchor, constant: -16),
             starCard.widthAnchor.constraint(equalTo: root.widthAnchor),
+            catRow.widthAnchor.constraint(equalTo: root.widthAnchor),
             inputCard.widthAnchor.constraint(equalTo: root.widthAnchor),
             footer.widthAnchor.constraint(equalTo: root.widthAnchor)
         ])
@@ -2804,6 +3322,7 @@ final class FeedbackWindowController {
         win.makeFirstResponder(textView)
         self.window = win
         refreshUI()
+        AppleMotion.staggeredCardsReveal([starCard, catRow, inputCard], baseDelay: 0.03, stepDelay: 0.04)
     }
 
     private func refreshUI() {
