@@ -15,7 +15,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             return
         }
 
-        let rect = NSRect(x: 0, y: 0, width: 540, height: 670)
+        let rect = NSRect(x: 0, y: 0, width: 590, height: 680)
         let win = SettingsKeyCaptureWindow(
             contentRect: rect,
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -450,7 +450,7 @@ private final class SettingsContentView: NSView {
             symbol: "book.pages",
             symbolPointSize: 10.5,
             symbolWeight: .semibold,
-            title: "How to Use",
+            title: "Guide",
             tooltip: "Open quick How-to-Use guide",
             height: 26,
             style: .clear,
@@ -464,7 +464,7 @@ private final class SettingsContentView: NSView {
             symbol: "sparkles",
             symbolPointSize: 10.5,
             symbolWeight: .semibold,
-            title: "Setup Guide",
+            title: "Setup",
             tooltip: "Open 3-Step Welcome Setup",
             height: 26,
             style: .clear,
@@ -490,22 +490,26 @@ private final class SettingsContentView: NSView {
 
         let aboutBtn = LiquidGlassButton(
             symbol: "info.circle",
-            symbolPointSize: 11,
+            symbolPointSize: 11.5,
             symbolWeight: .medium,
-            title: "About",
             tooltip: "About LoopSearch",
-            height: 26,
+            fixedSize: CGSize(width: 26, height: 26),
             style: .clear,
-            foregroundColor: .labelColor,
-            font: .systemFont(ofSize: 11, weight: .medium)
+            foregroundColor: .labelColor
         ) {
             AboutWindowController.shared.show()
         }
 
+        let topActionsGroup = LiquidGlassGroupView(spacing: 6)
+        topActionsGroup.stackView.addArrangedSubview(howToUseBtn)
+        topActionsGroup.stackView.addArrangedSubview(welcomeBtn)
+        topActionsGroup.stackView.addArrangedSubview(updatesBtn)
+        topActionsGroup.stackView.addArrangedSubview(aboutBtn)
+
         let headerSpacer = NSView()
         headerSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let headerRow = NSStackView(views: [logo, titleStack, headerSpacer, howToUseBtn, welcomeBtn, updatesBtn, aboutBtn])
+        let headerRow = NSStackView(views: [logo, titleStack, headerSpacer, topActionsGroup])
         headerRow.orientation = .horizontal
         headerRow.alignment = .centerY
         headerRow.spacing = 10
@@ -542,7 +546,7 @@ private final class SettingsContentView: NSView {
         NSLayoutConstraint.activate([
             headerRow.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 22),
             headerRow.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -22),
-            headerRow.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
+            headerRow.topAnchor.constraint(equalTo: container.topAnchor, constant: 28),
 
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 22),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -22),

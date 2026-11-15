@@ -2596,7 +2596,7 @@ private final class GooglePromptCapsuleView: NSView, NSGestureRecognizerDelegate
     private let glowPadding: CGFloat = 24
     private let backdropView: LiquidGlassSurfaceView = {
         let view = LiquidGlassSurfaceView(
-            cornerRadius: 26,
+            cornerRadius: 22,
             style: .regular,
             tintColor: NSColor(red: 0.042, green: 0.052, blue: 0.098, alpha: 0.82),
             lightTintColor: NSColor(white: 0.96, alpha: 0.86),
@@ -2878,8 +2878,8 @@ private final class GooglePromptCapsuleView: NSView, NSGestureRecognizerDelegate
         backdropView.contentContainer.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: backdropView.contentContainer.leadingAnchor, constant: 15),
-            stack.trailingAnchor.constraint(equalTo: backdropView.contentContainer.trailingAnchor, constant: -11),
+            stack.leadingAnchor.constraint(equalTo: backdropView.contentContainer.leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: backdropView.contentContainer.trailingAnchor, constant: -8),
             stack.topAnchor.constraint(equalTo: backdropView.contentContainer.topAnchor, constant: 8),
             stack.bottomAnchor.constraint(equalTo: backdropView.contentContainer.bottomAnchor, constant: -8)
         ])
@@ -3015,14 +3015,17 @@ private final class SheetResizeHandleView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        ctx.setStrokeColor(NSColor.secondaryLabelColor.withAlphaComponent(0.45).cgColor)
-        ctx.setLineWidth(1.4)
+        ctx.setStrokeColor(NSColor.secondaryLabelColor.withAlphaComponent(0.36).cgColor)
+        ctx.setLineWidth(1.5)
         ctx.setLineCap(.round)
-        for i in 0..<2 {
-            let offset = CGFloat(i) * 4.2
-            ctx.move(to: CGPoint(x: bounds.maxX - 11 + offset, y: bounds.minY + 3))
-            ctx.addLine(to: CGPoint(x: bounds.maxX - 3, y: bounds.minY + 11 - offset))
-        }
+        let concentricCenter = CGPoint(x: bounds.maxX - 24, y: bounds.minY + 24)
+        ctx.addArc(
+            center: concentricCenter,
+            radius: 19.0,
+            startAngle: -.pi * 0.34,
+            endAngle: -.pi * 0.16,
+            clockwise: false
+        )
         ctx.strokePath()
     }
 }
@@ -3071,6 +3074,7 @@ private final class AdaptiveSurfaceView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = cornerRadius
+        layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
         layer?.borderWidth = borderWidth
         applyAppearance(animated: false)
@@ -3209,7 +3213,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     )
     private let backdropView: LiquidGlassSurfaceView = {
         let view = LiquidGlassSurfaceView(
-            cornerRadius: 22,
+            cornerRadius: 24,
             style: .regular,
             tintColor: NSColor(red: 0.024, green: 0.032, blue: 0.064, alpha: 0.93),
             lightTintColor: NSColor(white: 0.96, alpha: 0.93)
@@ -3220,7 +3224,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         return view
     }()
     private let grabHandleView = SheetGrabHandleView()
-    private let resizeHandleView = SheetResizeHandleView(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
+    private let resizeHandleView = SheetResizeHandleView(frame: NSRect(x: 0, y: 0, width: 22, height: 22))
     private var dragEngine = DragInertiaEngine()
     private var headerTrackingArea: NSTrackingArea?
 
@@ -3228,8 +3232,9 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     private var backButton: LiquidGlassButton!
     private var webThemeButton: LiquidGlassButton!
     private var moreButton: LiquidGlassButton!
-    private var topBarStack: NSStackView!
+    private var topBarStack: NSView!
     private var heroRightStackRef: NSStackView!
+    private var snippetRowRef: NSStackView!
 
     private var heroCard: NSView!
     private var searchBarContainer: AdaptiveSurfaceView!
@@ -3237,9 +3242,9 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     private var snippetPreviewLabel: NSTextField!
     private var snippetCopyButton: LiquidGlassButton!
 
-    private var actionRowScroll: NSStackView!
-    private var primaryActionsRow: NSStackView!
-    private var smartChipsRow: NSStackView!
+    private var actionRowScroll: NSScrollView!
+    private var chipsDocViewRef: NSView!
+    private var actionChipsStack: NSStackView!
     private var searchActionBtn: LiquidGlassButton!
     private var translateActionBtn: LiquidGlassButton!
     private var copyTextChip: LiquidGlassButton!
@@ -3257,6 +3262,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     private var errorStateTitleLabel: NSTextField!
 
     private var webOuterCard: NSView!
+    private var webClipViewRef: AdaptiveSurfaceView!
     private var webView: WKWebView!
     private var loadingOverlay: AdaptiveSurfaceView!
     private let loaderHorizonGlowLayer = CAGradientLayer()
@@ -3313,10 +3319,15 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                         background-color: #090e1a !important;
                         color: #edf2fb !important;
                     }
-                    code, pre, kbd, samp, tt, mark {
-                        background-color: rgba(34, 48, 76, 0.85) !important;
+                    code, pre, kbd, samp, tt {
+                        background-color: rgba(30, 44, 72, 0.86) !important;
                         color: #d6e8ff !important;
                         border-color: rgba(130, 175, 255, 0.24) !important;
+                    }
+                    mark, mark * {
+                        background-color: rgba(56, 189, 248, 0.14) !important;
+                        color: #edf2fb !important;
+                        border-radius: 4px !important;
                     }
                     code *, pre *, kbd *, samp * {
                         background-color: transparent !important;
@@ -3327,16 +3338,24 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                         color: #edf2fb !important;
                         border-color: rgba(130, 175, 255, 0.18) !important;
                     }
-                    input, textarea {
-                        background-color: rgba(18, 28, 46, 0.92) !important;
+                    input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([type="range"]),
+                    textarea {
+                        background-color: transparent !important;
+                        background-image: none !important;
                         color: #edf2fb !important;
                         caret-color: #5cb8ff !important;
-                        border-color: rgba(130, 175, 255, 0.24) !important;
+                        border-color: transparent !important;
+                        box-shadow: none !important;
+                        outline: none !important;
                     }
                     input::placeholder, textarea::placeholder {
                         color: #93a7c4 !important;
                     }
                     a, a * { color: #7cc4ff !important; }
+                    a:not([role="button"]), a:not([role="button"]) * {
+                        background-color: transparent !important;
+                        background-image: none !important;
+                    }
                     svg { color: #a8caf5; }
                 `;
                 (document.head || document.documentElement).appendChild(st);
@@ -3347,6 +3366,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                 var nodes = [document.body];
                 var all = document.body.getElementsByTagName('*');
                 for (var k = 0; k < all.length; k++) { nodes.push(all[k]); }
+                var vw = window.innerWidth || 420;
                 for (var i = 0; i < nodes.length; i++) {
                     var el = nodes[i];
                     if (skipTags[el.tagName]) continue;
@@ -3364,11 +3384,24 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                         var m = bg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?\\)/);
                         if (m) {
                             var r = +m[1], g = +m[2], b = +m[3], a = m[4] !== undefined ? +m[4] : 1;
-                            if (a > 0.12 && r > 155 && g > 155 && b > 155) {
+                            var hasBorder = parseFloat(cs.borderTopWidth) > 0.2 || parseFloat(cs.borderBottomWidth) > 0.2 || parseFloat(cs.borderLeftWidth) > 0.2 || parseFloat(cs.borderRightWidth) > 0.2;
+                            if ((el.tagName === 'SPAN' || el.tagName === 'EM') && a > 0.15 && b > 135 && (b - r) > 38 && g < 195) {
+                                var wrapsLink = el.querySelector('a') !== null || el.closest('a') !== null;
+                                el.style.setProperty('background-color', wrapsLink ? 'transparent' : 'rgba(56, 189, 248, 0.14)', 'important');
+                                el.setAttribute('data-cts-dark-bg', '1');
+                            } else if (a > 0.12 && r > 155 && g > 155 && b > 155) {
                                 var isRoot = (el.tagName === 'BODY' || el.tagName === 'MAIN');
                                 el.style.setProperty('background-color', isRoot ? '#090e1a' : 'rgba(17, 25, 42, 0.92)', 'important');
-                                el.style.setProperty('border-color', 'rgba(130, 175, 255, 0.16)', 'important');
+                                if (hasBorder) {
+                                    el.style.setProperty('border-color', 'rgba(130, 175, 255, 0.16)', 'important');
+                                }
                                 el.setAttribute('data-cts-dark-bg', '1');
+                            } else if (a > 0.72 && Math.max(r, g, b) <= 52 && (Math.max(r, g, b) - Math.min(r, g, b)) <= 10) {
+                                var rect = el.getBoundingClientRect();
+                                if (rect.width >= vw * 0.84) {
+                                    el.style.setProperty('background-color', '#090e1a', 'important');
+                                    el.setAttribute('data-cts-dark-bg', '1');
+                                }
                             }
                         }
                     }
@@ -3458,7 +3491,10 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         stopLoaderAnimations()
         webView?.stopLoading()
         webView?.evaluateJavaScript(
-            "if(window.__ctsThemeObserver){window.__ctsThemeObserver.disconnect();window.__ctsThemeObserver=null;}",
+            """
+            if(window.__ctsThemeObserver){window.__ctsThemeObserver.disconnect();window.__ctsThemeObserver=null;}
+            if(window.__ctsCleanObserver){window.__ctsCleanObserver.disconnect();window.__ctsCleanObserver=null;}
+            """,
             completionHandler: nil
         )
         webView?.loadHTMLString("", baseURL: nil)
@@ -3478,15 +3514,31 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             st.id = 'cts-clean-style';
             st.textContent = `
                 header, #searchform, form[action="/search"], [role="search"],
+                #sfcnt, #tophf,
                 div[data-hveid] input[aria-label*="Add to your search"],
                 div[jscontroller] > div > a[aria-label="Google"],
                 div[aria-label="Add to your search"],
                 hr, [role="separator"] {
                     display: none !important;
                 }
-                body {
+                html, body {
+                    width: 100% !important;
+                    max-width: 100% !important;
                     padding-top: 2px !important;
+                    margin-top: 0 !important;
                     overflow-x: hidden !important;
+                    box-sizing: border-box !important;
+                }
+                main, [role="main"], c-wiz, form {
+                    max-width: 100% !important;
+                    min-width: 0 !important;
+                    box-sizing: border-box !important;
+                }
+                img, video, svg {
+                    max-width: 100% !important;
+                }
+                c-wiz img:not(a[href] img), [role="main"] img:not(a[href] img) {
+                    object-fit: contain !important;
                 }
                 div[data-attrid], div[data-hveid], section, c-wiz {
                     margin-bottom: 4px !important;
@@ -3523,38 +3575,98 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             `;
             (document.head || document.documentElement).appendChild(st);
         }
-        // 1. Hide any parent toolbar containing duplicate 'Add to your search' text
-        var walker = document.querySelectorAll('input, span, div');
-        for (var i = 0; i < walker.length; i++) {
-            var el = walker[i];
-            var txt = (el.getAttribute('placeholder') || el.getAttribute('aria-label') || '').toLowerCase();
-            if (txt.indexOf('add to your search') !== -1) {
-                var box = el.closest('form') || el.closest('[role="search"]') || el.parentElement;
-                if (box && box.offsetHeight < 120) {
-                    box.style.setProperty('display', 'none', 'important');
+        function hasVisibleInteractiveOrMedia(root) {
+            var items = root.querySelectorAll('img, svg, canvas, video, input, textarea, [role="tab"], [role="tablist"], [role="button"], button, a');
+            for (var m = 0; m < items.length; m++) {
+                var item = items[m];
+                var ics = window.getComputedStyle(item);
+                if (ics.display === 'none' || ics.visibility === 'hidden' || parseFloat(ics.opacity) === 0) continue;
+                var ir = item.getBoundingClientRect();
+                if (ir.width > 2 && ir.height > 2) return true;
+            }
+            return false;
+        }
+        function runCleanupPass() {
+            if (location.pathname.indexOf('/sorry') === 0 || !document.body) return;
+            // 1. Hide any parent toolbar containing duplicate 'Add to your search' text
+            var walker = document.querySelectorAll('input, span, div');
+            for (var i = 0; i < walker.length; i++) {
+                var el = walker[i];
+                var txt = (el.getAttribute('placeholder') || el.getAttribute('aria-label') || '').toLowerCase();
+                if (txt.indexOf('add to your search') !== -1) {
+                    var box = el.closest('form') || el.closest('[role="search"]') || el.parentElement;
+                    if (box && box.offsetHeight < 120) {
+                        box.style.setProperty('display', 'none', 'important');
+                    }
+                }
+            }
+            // 2. Collapse empty orphaned top header chrome and dead spacer blocks
+            var allDivs = document.querySelectorAll('div, section, nav');
+            for (var j = 0; j < allDivs.length; j++) {
+                var d = allDivs[j];
+                if (d.getAttribute('data-cts-keep') === '1') continue;
+                var rect = d.getBoundingClientRect();
+                var textTrim = (d.innerText || '').trim();
+                if (rect.top >= -12 && rect.top < 140 && rect.height >= 10 && rect.height <= 180) {
+                    if (textTrim.length === 0 && !hasVisibleInteractiveOrMedia(d)) {
+                        d.style.setProperty('display', 'none', 'important');
+                        d.style.setProperty('height', '0px', 'important');
+                        d.style.setProperty('min-height', '0px', 'important');
+                        d.style.setProperty('margin', '0px', 'important');
+                        d.style.setProperty('padding', '0px', 'important');
+                        d.style.setProperty('border', 'none', 'important');
+                        continue;
+                    }
+                }
+                if (d.children.length === 0 && (d.textContent || '').trim() === '' && d.offsetHeight >= 14 && d.offsetHeight <= 150) {
+                    var bg = window.getComputedStyle(d).backgroundImage;
+                    if (!bg || bg === 'none') {
+                        d.style.setProperty('display', 'none', 'important');
+                        d.style.setProperty('height', '0px', 'important');
+                        d.style.setProperty('margin', '0px', 'important');
+                        d.style.setProperty('padding', '0px', 'important');
+                        continue;
+                    }
+                }
+                var style = window.getComputedStyle(d);
+                if (rect.top >= -4 && rect.top < 120) {
+                    if (parseInt(style.paddingTop, 10) > 18) {
+                        d.style.setProperty('padding-top', '4px', 'important');
+                    }
+                    if (parseInt(style.marginTop, 10) > 16) {
+                        d.style.setProperty('margin-top', '0px', 'important');
+                    }
+                }
+                if (parseInt(style.marginBottom, 10) > 16) {
+                    d.style.setProperty('margin-bottom', '6px', 'important');
+                }
+                if (parseInt(style.paddingBottom, 10) > 20 && d.offsetHeight < 220) {
+                    d.style.setProperty('padding-bottom', '6px', 'important');
+                }
+            }
+            var mainWrap = document.querySelector('main, [role="main"], #main, #cnt, #rcnt');
+            if (mainWrap) {
+                var mcs = window.getComputedStyle(mainWrap);
+                if (parseInt(mcs.paddingTop, 10) > 14) {
+                    mainWrap.style.setProperty('padding-top', '4px', 'important');
+                }
+                if (parseInt(mcs.marginTop, 10) > 12) {
+                    mainWrap.style.setProperty('margin-top', '0px', 'important');
                 }
             }
         }
-        // 2. Collapse empty dark dead-gap strips between AI Overview feedback row and Visual Matches
-        var allDivs = document.querySelectorAll('div, section');
-        for (var j = 0; j < allDivs.length; j++) {
-            var d = allDivs[j];
-            if (d.children.length === 0 && d.textContent.trim() === '' && d.offsetHeight >= 18 && d.offsetHeight <= 140) {
-                var bg = window.getComputedStyle(d).backgroundImage;
-                if (!bg || bg === 'none') {
-                    d.style.setProperty('display', 'none', 'important');
-                    d.style.setProperty('height', '0px', 'important');
-                    d.style.setProperty('margin', '0px', 'important');
-                    d.style.setProperty('padding', '0px', 'important');
-                }
-            }
-            var style = window.getComputedStyle(d);
-            if (parseInt(style.marginBottom, 10) > 16) {
-                d.style.setProperty('margin-bottom', '6px', 'important');
-            }
-            if (parseInt(style.paddingBottom, 10) > 20 && d.offsetHeight < 220) {
-                d.style.setProperty('padding-bottom', '6px', 'important');
-            }
+        runCleanupPass();
+        if (!window.__ctsCleanObserver && document.body) {
+            var cleanQueued = false;
+            window.__ctsCleanObserver = new MutationObserver(function() {
+                if (cleanQueued) return;
+                cleanQueued = true;
+                requestAnimationFrame(function() {
+                    cleanQueued = false;
+                    runCleanupPass();
+                });
+            });
+            window.__ctsCleanObserver.observe(document.body, { childList: true, subtree: true });
         }
     })();
     """
@@ -3794,19 +3906,19 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
         let rootStack = NSStackView()
         rootStack.orientation = .vertical
-        rootStack.alignment = .centerX
+        rootStack.alignment = .leading
         rootStack.spacing = 8
         rootStack.translatesAutoresizingMaskIntoConstraints = false
         backdropView.contentContainer.addSubview(rootStack)
 
         NSLayoutConstraint.activate([
-            rootStack.leadingAnchor.constraint(equalTo: backdropView.contentContainer.leadingAnchor, constant: 12),
-            rootStack.trailingAnchor.constraint(equalTo: backdropView.contentContainer.trailingAnchor, constant: -12),
-            rootStack.topAnchor.constraint(equalTo: backdropView.contentContainer.topAnchor, constant: 6),
-            rootStack.bottomAnchor.constraint(equalTo: backdropView.contentContainer.bottomAnchor, constant: -12)
+            rootStack.leadingAnchor.constraint(equalTo: backdropView.contentContainer.leadingAnchor, constant: 10),
+            rootStack.trailingAnchor.constraint(equalTo: backdropView.contentContainer.trailingAnchor, constant: -10),
+            rootStack.topAnchor.constraint(equalTo: backdropView.contentContainer.topAnchor, constant: 8),
+            rootStack.bottomAnchor.constraint(equalTo: backdropView.contentContainer.bottomAnchor, constant: -10)
         ])
 
-        // 1. Clean Top Bar: Engine Selector + Back on Left, Grab Pill in Center, ONLY Pin, Copy, More (⋯), and Close on Right
+        // 1. Clean Top Bar: Engine + Back on Left, True-Centered Grab Pill, Unified 26pt Controls on Right
         let currentEngine = AppSettings.shared.searchEngine
         engineButton = LiquidGlassButton(
             symbol: currentEngine.symbolName,
@@ -3823,7 +3935,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         }
         engineButton.setAccessibilityLabel("Switch Search Engine")
 
-        backButton = makeGlassCircleButton(symbol: "chevron.left", pointSize: 11.0, weight: .semibold, tooltip: "Back") { [weak self] in
+        backButton = makeGlassCircleButton(symbol: "chevron.left", pointSize: 10.5, weight: .semibold, tooltip: "Back") { [weak self] in
             self?.handleBack()
         }
         backButton.isHidden = true
@@ -3833,16 +3945,12 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         leftTopGroup.stackView.addArrangedSubview(backButton)
         leftTopGroup.stackView.addArrangedSubview(engineButton)
 
-        grabHandleView.translatesAutoresizingMaskIntoConstraints = false
-        grabHandleView.heightAnchor.constraint(equalToConstant: 22).isActive = true
-        grabHandleView.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
         let pinBtn = makeGlassCircleButton(symbol: "pin.fill", pointSize: 10.0, weight: .medium, tooltip: "Pin to Screen (⌘P)") { [weak self] in
             self?.onPinImage()
         }
         pinBtn.setAccessibilityLabel("Pin to Screen")
 
-        let copyBtn = makeGlassCircleButton(symbol: "doc.on.doc", pointSize: 10.5, weight: .medium, tooltip: "Copy Text or Image (⌘C)") { [weak self] in
+        let copyBtn = makeGlassCircleButton(symbol: "doc.on.doc", pointSize: 10.0, weight: .medium, tooltip: "Copy Text or Image (⌘C)") { [weak self] in
             self?.triggerKeyboardCopy()
         }
         copyBtn.setAccessibilityLabel("Copy Text or Image")
@@ -3853,12 +3961,12 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         webThemeButton.setAccessibilityLabel("Switch Web Results Theme")
         updateWebThemeButtonUI(dark: isEffectiveDarkMode)
 
-        moreButton = makeGlassCircleButton(symbol: "ellipsis", pointSize: 11.5, weight: .bold, tooltip: "More Actions (Sticker, Save, Expand, Browser)") { [weak self] in
+        moreButton = makeGlassCircleButton(symbol: "ellipsis", pointSize: 11.0, weight: .bold, tooltip: "More Actions (Sticker, Save, Expand, Browser)") { [weak self] in
             self?.showMoreActionsMenu()
         }
         moreButton.setAccessibilityLabel("More Actions")
 
-        let closeBtn = makeGlassCircleButton(symbol: "xmark", pointSize: 10.5, weight: .semibold, tooltip: "Close (Esc)") { [weak self] in
+        let closeBtn = makeGlassCircleButton(symbol: "xmark", pointSize: 10.0, weight: .semibold, tooltip: "Close (Esc)") { [weak self] in
             self?.handleClose()
         }
         closeBtn.setAccessibilityLabel("Close")
@@ -3870,13 +3978,37 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         actionsGroup.stackView.addArrangedSubview(moreButton)
         actionsGroup.stackView.addArrangedSubview(closeBtn)
 
-        topBarStack = NSStackView(views: [leftTopGroup, grabHandleView, actionsGroup])
-        topBarStack.orientation = .horizontal
-        topBarStack.alignment = .centerY
-        topBarStack.spacing = 8
-        topBarStack.translatesAutoresizingMaskIntoConstraints = false
-        rootStack.addArrangedSubview(topBarStack)
-        topBarStack.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
+        let topBarContainer = NSView()
+        topBarContainer.wantsLayer = true
+        topBarContainer.translatesAutoresizingMaskIntoConstraints = false
+        topBarContainer.heightAnchor.constraint(equalToConstant: 26).isActive = true
+
+        leftTopGroup.translatesAutoresizingMaskIntoConstraints = false
+        actionsGroup.translatesAutoresizingMaskIntoConstraints = false
+        grabHandleView.translatesAutoresizingMaskIntoConstraints = false
+
+        topBarContainer.addSubview(leftTopGroup)
+        topBarContainer.addSubview(grabHandleView)
+        topBarContainer.addSubview(actionsGroup)
+
+        NSLayoutConstraint.activate([
+            leftTopGroup.leadingAnchor.constraint(equalTo: topBarContainer.leadingAnchor),
+            leftTopGroup.centerYAnchor.constraint(equalTo: topBarContainer.centerYAnchor),
+
+            actionsGroup.trailingAnchor.constraint(equalTo: topBarContainer.trailingAnchor),
+            actionsGroup.centerYAnchor.constraint(equalTo: topBarContainer.centerYAnchor),
+
+            leftTopGroup.trailingAnchor.constraint(lessThanOrEqualTo: actionsGroup.leadingAnchor, constant: -8),
+
+            grabHandleView.centerXAnchor.constraint(equalTo: topBarContainer.centerXAnchor),
+            grabHandleView.centerYAnchor.constraint(equalTo: topBarContainer.centerYAnchor),
+            grabHandleView.widthAnchor.constraint(equalToConstant: 44),
+            grabHandleView.heightAnchor.constraint(equalToConstant: 22)
+        ])
+
+        topBarStack = topBarContainer
+        rootStack.addArrangedSubview(topBarContainer)
+        topBarContainer.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
 
         // 2. Clean Flat Screenshot Preview + Matte Search Header (Zero Nested Liquid Glass)
         heroCard = NSView()
@@ -3887,20 +4019,20 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         thumbShadowHost.wantsLayer = true
         thumbShadowHost.layer?.masksToBounds = false
         thumbShadowHost.layer?.shadowColor = NSColor.black.cgColor
-        thumbShadowHost.layer?.shadowOpacity = 0.26
-        thumbShadowHost.layer?.shadowRadius = 7
+        thumbShadowHost.layer?.shadowOpacity = 0.24
+        thumbShadowHost.layer?.shadowRadius = 6
         thumbShadowHost.layer?.shadowOffset = CGSize(width: 0, height: -2)
         thumbShadowHost.translatesAutoresizingMaskIntoConstraints = false
-        thumbShadowHost.widthAnchor.constraint(equalToConstant: 84).isActive = true
-        thumbShadowHost.heightAnchor.constraint(equalToConstant: 58).isActive = true
+        thumbShadowHost.widthAnchor.constraint(equalToConstant: 66).isActive = true
+        thumbShadowHost.heightAnchor.constraint(equalToConstant: 52).isActive = true
 
         let thumbContainer = AdaptiveSurfaceView(
             cornerRadius: 10,
-            darkFill: NSColor.black.withAlphaComponent(0.24),
+            darkFill: NSColor.white.withAlphaComponent(0.04),
             lightFill: NSColor.black.withAlphaComponent(0.04),
-            darkBorder: NSColor.white.withAlphaComponent(0.14),
+            darkBorder: NSColor.white.withAlphaComponent(0.12),
             lightBorder: NSColor.black.withAlphaComponent(0.09),
-            borderWidth: 0.5
+            borderWidth: 0.75
         )
         thumbContainer.translatesAutoresizingMaskIntoConstraints = false
         thumbShadowHost.addSubview(thumbContainer)
@@ -4017,11 +4149,12 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         snippetRow.alignment = .centerY
         snippetRow.distribution = .fill
         snippetRow.spacing = 8
+        snippetRowRef = snippetRow
 
         let heroRightStack = NSStackView(views: [searchBarContainer, snippetRow])
         heroRightStack.orientation = .vertical
         heroRightStack.alignment = .leading
-        heroRightStack.spacing = 5
+        heroRightStack.spacing = 4
         heroRightStack.translatesAutoresizingMaskIntoConstraints = false
         searchBarContainer.widthAnchor.constraint(equalTo: heroRightStack.widthAnchor).isActive = true
         snippetRow.widthAnchor.constraint(equalTo: heroRightStack.widthAnchor).isActive = true
@@ -4030,7 +4163,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         let heroMainStack = NSStackView(views: [thumbShadowHost, heroRightStack])
         heroMainStack.orientation = .horizontal
         heroMainStack.alignment = .centerY
-        heroMainStack.spacing = 11
+        heroMainStack.spacing = 10
         heroMainStack.translatesAutoresizingMaskIntoConstraints = false
         heroMainStack.distribution = .fill
         thumbShadowHost.setContentHuggingPriority(.required, for: .horizontal)
@@ -4041,17 +4174,17 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         heroCard.addSubview(heroMainStack)
 
         NSLayoutConstraint.activate([
-            heroMainStack.leadingAnchor.constraint(equalTo: heroCard.leadingAnchor, constant: 2),
-            heroMainStack.trailingAnchor.constraint(equalTo: heroCard.trailingAnchor, constant: -2),
-            heroMainStack.topAnchor.constraint(equalTo: heroCard.topAnchor, constant: 2),
-            heroMainStack.bottomAnchor.constraint(equalTo: heroCard.bottomAnchor, constant: -2)
+            heroMainStack.leadingAnchor.constraint(equalTo: heroCard.leadingAnchor),
+            heroMainStack.trailingAnchor.constraint(equalTo: heroCard.trailingAnchor),
+            heroMainStack.topAnchor.constraint(equalTo: heroCard.topAnchor),
+            heroMainStack.bottomAnchor.constraint(equalTo: heroCard.bottomAnchor)
         ])
 
         rootStack.addArrangedSubview(heroCard)
         heroCard.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
         heroCard.setContentCompressionResistancePriority(.required, for: .vertical)
 
-        // 3. Clear Primary Action Row First: Search, Translate, Copy Text, Explain + Smart Content-Type Chips
+        // 3. Single-Row Leading-Aligned Scrollable Action Strip (No dangling centered second row)
         searchActionBtn = makeGlassChip(title: "Search", symbol: "magnifyingglass") { [weak self] in
             self?.handleSearchText()
         }
@@ -4079,33 +4212,40 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         }
         colorHexChip.isHidden = true
 
-        primaryActionsRow = NSStackView(views: [
+        actionChipsStack = NSStackView(views: [
             searchActionBtn,
-            translateActionBtn,
-            copyTextChip,
-            explainActionBtn
-        ])
-        primaryActionsRow.orientation = .horizontal
-        primaryActionsRow.alignment = .centerY
-        primaryActionsRow.spacing = 6
-
-        smartChipsRow = NSStackView(views: [
             openLinkChip,
             mathResultChip,
+            translateActionBtn,
+            copyTextChip,
+            explainActionBtn,
             colorHexChip
         ])
-        smartChipsRow.orientation = .horizontal
-        smartChipsRow.alignment = .centerY
-        smartChipsRow.spacing = 6
-        smartChipsRow.isHidden = true
+        actionChipsStack.orientation = .horizontal
+        actionChipsStack.alignment = .centerY
+        actionChipsStack.spacing = 6
+        actionChipsStack.translatesAutoresizingMaskIntoConstraints = false
 
-        actionRowScroll = NSStackView(views: [primaryActionsRow, smartChipsRow])
-        actionRowScroll.orientation = .vertical
-        actionRowScroll.alignment = .centerX
-        actionRowScroll.spacing = 5
+        let chipsDocView = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 27))
+        chipsDocView.addSubview(actionChipsStack)
+        NSLayoutConstraint.activate([
+            actionChipsStack.leadingAnchor.constraint(equalTo: chipsDocView.leadingAnchor),
+            actionChipsStack.centerYAnchor.constraint(equalTo: chipsDocView.centerYAnchor)
+        ])
+        chipsDocViewRef = chipsDocView
+
+        actionRowScroll = NSScrollView()
+        actionRowScroll.drawsBackground = false
+        actionRowScroll.hasVerticalScroller = false
+        actionRowScroll.hasHorizontalScroller = false
+        actionRowScroll.borderType = .noBorder
+        actionRowScroll.horizontalScrollElasticity = .automatic
+        actionRowScroll.verticalScrollElasticity = .none
+        actionRowScroll.documentView = chipsDocView
         actionRowScroll.translatesAutoresizingMaskIntoConstraints = false
+        actionRowScroll.heightAnchor.constraint(equalToConstant: 27).isActive = true
         rootStack.addArrangedSubview(actionRowScroll)
-        actionRowScroll.widthAnchor.constraint(lessThanOrEqualTo: rootStack.widthAnchor).isActive = true
+        actionRowScroll.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
         actionRowScroll.setContentCompressionResistancePriority(.required, for: .vertical)
 
         // 4. Inline Streaming AI Answer Card (Right Above Google Results: 1-2 lines, streaming text, Copy button)
@@ -4171,7 +4311,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
         // 5. Empty / Boring Selection Card ("Not much here. Try selecting something with text or an object.")
         emptySelectionCard = LiquidGlassSurfaceView(
-            cornerRadius: 16,
+            cornerRadius: 14,
             style: .regular,
             tintColor: NSColor.labelColor.withAlphaComponent(0.05)
         )
@@ -4283,7 +4423,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         webOuterCard.translatesAutoresizingMaskIntoConstraints = false
 
         let webClipView = AdaptiveSurfaceView(
-            cornerRadius: 16,
+            cornerRadius: 14,
             darkFill: NSColor.black.withAlphaComponent(0.18),
             lightFill: NSColor.black.withAlphaComponent(0.03),
             darkBorder: NSColor.white.withAlphaComponent(0.08),
@@ -4291,7 +4431,16 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             borderWidth: 0.75
         )
         webClipView.translatesAutoresizingMaskIntoConstraints = false
+        webClipViewRef = webClipView
         webOuterCard.addSubview(webClipView)
+
+        let webMaskView = NSView()
+        webMaskView.wantsLayer = true
+        webMaskView.layer?.cornerRadius = 14
+        webMaskView.layer?.cornerCurve = .continuous
+        webMaskView.layer?.masksToBounds = true
+        webMaskView.translatesAutoresizingMaskIntoConstraints = false
+        webClipView.addSubview(webMaskView)
 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
@@ -4306,24 +4455,25 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
         webView = WKWebView(frame: .zero, configuration: config)
         webView.customUserAgent = GoogleLensService.mobileUserAgent
-        if isCompactWidth {
-            webView.pageZoom = 0.90
-        }
         webView.navigationDelegate = self
         webView.uiDelegate = self
+        webView.wantsLayer = true
+        webView.layer?.cornerRadius = 14
+        webView.layer?.cornerCurve = .continuous
+        webView.layer?.masksToBounds = true
         webView.alphaValue = 0.0
         webView.translatesAutoresizingMaskIntoConstraints = false
-        webClipView.addSubview(webView)
+        webMaskView.addSubview(webView)
         syncWebViewAppearance()
 
         // GPU-composited Searching Overlay (zero nested NSGlassEffectView blur & zero per-frame CPU CGGradient draws)
         loadingOverlay = AdaptiveSurfaceView(
-            cornerRadius: 16,
+            cornerRadius: 14,
             darkFill: NSColor(red: 0.008, green: 0.015, blue: 0.036, alpha: 0.96),
             lightFill: NSColor(white: 0.96, alpha: 0.95),
-            darkBorder: NSColor(red: 0.18, green: 0.64, blue: 1.00, alpha: 0.20),
-            lightBorder: NSColor.black.withAlphaComponent(0.08),
-            borderWidth: 0.75
+            darkBorder: .clear,
+            lightBorder: .clear,
+            borderWidth: 0.0
         )
         loadingOverlay.translatesAutoresizingMaskIntoConstraints = false
 
@@ -4402,10 +4552,15 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             webClipView.topAnchor.constraint(equalTo: webOuterCard.topAnchor),
             webClipView.bottomAnchor.constraint(equalTo: webOuterCard.bottomAnchor),
 
-            webView.leadingAnchor.constraint(equalTo: webClipView.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: webClipView.trailingAnchor),
-            webView.topAnchor.constraint(equalTo: webClipView.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: webClipView.bottomAnchor),
+            webMaskView.leadingAnchor.constraint(equalTo: webClipView.leadingAnchor),
+            webMaskView.trailingAnchor.constraint(equalTo: webClipView.trailingAnchor),
+            webMaskView.topAnchor.constraint(equalTo: webClipView.topAnchor),
+            webMaskView.bottomAnchor.constraint(equalTo: webClipView.bottomAnchor),
+
+            webView.leadingAnchor.constraint(equalTo: webMaskView.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: webMaskView.trailingAnchor),
+            webView.topAnchor.constraint(equalTo: webMaskView.topAnchor),
+            webView.bottomAnchor.constraint(equalTo: webMaskView.bottomAnchor),
 
             loadingOverlay.leadingAnchor.constraint(equalTo: webClipView.leadingAnchor),
             loadingOverlay.trailingAnchor.constraint(equalTo: webClipView.trailingAnchor),
@@ -4425,10 +4580,10 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         resizeHandleView.translatesAutoresizingMaskIntoConstraints = false
         backdropView.contentContainer.addSubview(resizeHandleView)
         NSLayoutConstraint.activate([
-            resizeHandleView.trailingAnchor.constraint(equalTo: backdropView.contentContainer.trailingAnchor, constant: -4),
-            resizeHandleView.bottomAnchor.constraint(equalTo: backdropView.contentContainer.bottomAnchor, constant: -4),
-            resizeHandleView.widthAnchor.constraint(equalToConstant: 18),
-            resizeHandleView.heightAnchor.constraint(equalToConstant: 18)
+            resizeHandleView.trailingAnchor.constraint(equalTo: backdropView.contentContainer.trailingAnchor),
+            resizeHandleView.bottomAnchor.constraint(equalTo: backdropView.contentContainer.bottomAnchor),
+            resizeHandleView.widthAnchor.constraint(equalToConstant: 22),
+            resizeHandleView.heightAnchor.constraint(equalToConstant: 22)
         ])
 
         startLoaderAnimations()
@@ -4470,6 +4625,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         if !aiAnswerCard.isHidden {
             aiAnswerLabel.preferredMaxLayoutWidth = max(120, aiAnswerCard.bounds.width - 104)
         }
+        updateChipsScrollContentSize()
     }
 
     private func startLoaderAnimations() {
@@ -4569,38 +4725,29 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         return cut + "…"
     }
 
+    private func updateChipsScrollContentSize() {
+        guard actionRowScroll != nil, actionChipsStack != nil, let docView = chipsDocViewRef else { return }
+        actionChipsStack.layoutSubtreeIfNeeded()
+        let contentW = actionChipsStack.fittingSize.width
+        let minW = actionRowScroll.bounds.width
+        docView.frame = NSRect(x: 0, y: 0, width: max(minW, contentW), height: 27)
+    }
+
     private func relayoutActionChips() {
-        let allChips: [LiquidGlassButton] = [
-            searchActionBtn,
-            translateActionBtn,
-            copyTextChip,
-            explainActionBtn,
-            openLinkChip,
-            mathResultChip,
-            colorHexChip
-        ]
-        let visible = allChips.filter { !$0.isHidden }
-        for v in primaryActionsRow.arrangedSubviews {
-            primaryActionsRow.removeArrangedSubview(v)
-            v.removeFromSuperview()
-        }
-        for v in smartChipsRow.arrangedSubviews {
-            smartChipsRow.removeArrangedSubview(v)
-            v.removeFromSuperview()
-        }
-        if visible.count <= 4 {
-            for chip in visible {
-                primaryActionsRow.addArrangedSubview(chip)
+        actionRowScroll?.contentView.scroll(to: .zero)
+        updateChipsScrollContentSize()
+    }
+
+    private func leaveLowInfoStateIfNeeded() {
+        emptySelectionCard.isHidden = true
+        webOuterCard.isHidden = false
+        if isLowInfoSelection {
+            isLowInfoSelection = false
+            snippetPreviewLabel.textColor = .secondaryLabelColor
+            if snippetPreviewLabel.stringValue.hasPrefix("Not much here") {
+                snippetPreviewLabel.stringValue = ""
+                snippetRowRef.isHidden = true
             }
-            smartChipsRow.isHidden = true
-        } else {
-            for chip in visible.prefix(4) {
-                primaryActionsRow.addArrangedSubview(chip)
-            }
-            for chip in visible.dropFirst(4) {
-                smartChipsRow.addArrangedSubview(chip)
-            }
-            smartChipsRow.isHidden = false
         }
     }
 
@@ -4617,7 +4764,10 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             snippetPreviewLabel.stringValue = "Not much here. Try selecting something with text or an object."
             snippetPreviewLabel.textColor = .labelColor
             snippetCopyButton.isHidden = true
+            snippetRowRef.isHidden = false
             translateActionBtn.isHidden = true
+            openLinkChip.isHidden = true
+            mathResultChip.isHidden = true
             colorHexChip.isHidden = true
             aiAnswerCard.isHidden = true
             webOuterCard.isHidden = true
@@ -4672,6 +4822,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             snippetPreviewLabel.toolTip = result.text
             snippetPreviewLabel.isHidden = false
             snippetCopyButton.isHidden = true
+            snippetRowRef.isHidden = false
         } else if !result.classificationLabels.isEmpty {
             let subjectTags = result.classificationLabels.prefix(3).map { $0.capitalized }.joined(separator: " · ")
             snippetPreviewLabel.stringValue = subjectTags
@@ -4679,11 +4830,13 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             snippetPreviewLabel.toolTip = nil
             snippetPreviewLabel.isHidden = false
             snippetCopyButton.isHidden = true
+            snippetRowRef.isHidden = false
         } else {
             snippetPreviewLabel.stringValue = ""
             snippetPreviewLabel.toolTip = nil
             snippetPreviewLabel.isHidden = true
             snippetCopyButton.isHidden = true
+            snippetRowRef.isHidden = true
         }
 
         // Only auto-show AI Answer Card when a Gemini API key is configured or a math/smart solution exists
@@ -5028,8 +5181,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         engineButton.toolTip = "Switch Search Engine (\(next.title))"
         engineButton.updateSymbol(next.symbolName, pointSize: 10.5, weight: .semibold)
         errorStateCard.isHidden = true
-        emptySelectionCard.isHidden = true
-        webOuterCard.isHidden = false
+        leaveLowInfoStateIfNeeded()
 
         let typed = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let fallbackQuery = !currentPreviewText.isEmpty
@@ -5058,8 +5210,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     @objc private func handleMultisearchSubmit() {
         let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
-        emptySelectionCard.isHidden = true
-        webOuterCard.isHidden = false
+        leaveLowInfoStateIfNeeded()
         startAIExplanationStream(prompt: query)
 
         let engine = AppSettings.shared.searchEngine
@@ -5105,8 +5256,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             }
             return
         }
-        emptySelectionCard.isHidden = true
-        webOuterCard.isHidden = false
+        leaveLowInfoStateIfNeeded()
         let engine = AppSettings.shared.searchEngine == .googleLens ? SearchEngine.google : AppSettings.shared.searchEngine
         guard let url = engine.searchURL(for: query) else { return }
         showLoadingOverlay(status: "Searching on \(engine.title)…")
@@ -5211,7 +5361,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             symbolPointSize: pointSize,
             symbolWeight: weight,
             tooltip: tooltip,
-            fixedSize: CGSize(width: 28, height: 28),
+            fixedSize: CGSize(width: 26, height: 26),
             style: .regular,
             foregroundColor: .labelColor,
             onAction: action
