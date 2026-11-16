@@ -361,33 +361,16 @@ enum KeychainHelper {
         return str
     }
 
+    private static let historyKeyFileName = "history-key.bin"
+
     static func loadOrCreateHistoryKey() -> SymmetricKey {
-        let service = "com.local.CircleToSearch.historyKey"
-        let account = "capture-history-aes256"
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var result: AnyObject?
-        if SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-           let raw = result as? Data,
+        if let raw = PrivateAppSupportVault.loadEncrypted(fileName: historyKeyFileName),
            raw.count == 32 {
             return SymmetricKey(data: raw)
         }
         let key = SymmetricKey(size: .bits256)
         let keyData = key.withUnsafeBytes { Data($0) }
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: keyData,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        ]
-        SecItemDelete(addQuery as CFDictionary)
-        SecItemAdd(addQuery as CFDictionary, nil)
+        PrivateAppSupportVault.saveEncrypted(keyData, fileName: historyKeyFileName)
         return key
     }
 }
