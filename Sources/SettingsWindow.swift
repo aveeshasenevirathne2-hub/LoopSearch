@@ -1871,7 +1871,7 @@ private final class FlippedDocumentView: NSView {
     override var isFlipped: Bool { true }
 }
 
-// MARK: - First-Run 4-Step Welcome Setup & Google Sign-In Gate
+// MARK: - First-Run 3-Step Welcome Setup
 
 @MainActor
 final class OnboardingWindowController: NSObject, NSWindowDelegate {
@@ -1895,7 +1895,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
             return
         }
 
-        let rect = NSRect(x: 0, y: 0, width: 556, height: 704)
+        let rect = NSRect(x: 0, y: 0, width: 580, height: 474)
         let win = SettingsKeyCaptureWindow(
             contentRect: rect,
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -1916,22 +1916,11 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
 
         let content = OnboardingContentView(
             frame: rect,
-            onFinish: { [weak self] tryNow in
-                guard FirebaseAuthService.shared.isSignedIn else {
-                    if tryNow {
-                        Task { @MainActor in
-                            _ = await FirebaseAuthService.shared.signInWithGoogle()
-                        }
-                    } else {
-                        self?.didLaunchOverlay = false
-                        self?.window?.close()
-                    }
-                    return
-                }
+            onFinish: { [weak self] startCapture in
                 AppSettings.shared.hasCompletedOnboarding = true
-                self?.didLaunchOverlay = tryNow
+                self?.didLaunchOverlay = startCapture
                 self?.window?.close()
-                if tryNow {
+                if startCapture {
                     onStartOverlay?()
                 }
             }
@@ -1959,25 +1948,30 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
 @MainActor
 private final class OnboardingContentView: NSView {
     private let onFinish: (Bool) -> Void
-    private var authStatusLabel: NSTextField!
-    private var authSubtitleLabel: NSTextField!
-    private var authActionBtn: LiquidGlassButton!
+
+    private var step1BadgeView: NSView!
+    private var step1BadgeLabel: NSTextField!
+    private var step2BadgeView: NSView!
+    private var step2BadgeLabel: NSTextField!
+    private var step3BadgeView: NSView!
+    private var step3BadgeLabel: NSTextField!
+
     private var permStatusLabel: NSTextField!
     private var permGrantBtn: LiquidGlassButton!
+    private var testCaptureBtn: LiquidGlassButton!
+    private var captureVerified = false
+
     private var hotkeyValueLabel: NSTextField!
     private var recordHotkeyBtn: LiquidGlassButton!
     private var hotkeyHintLabel: NSTextField!
     private var presetButtons: [HotkeyPreset: LiquidGlassButton] = [:]
-    private var appThemeSegment: LiquidGlassSegmentedControl!
-    private var webThemeSegment: LiquidGlassSegmentedControl!
-    private var keepDockToggle: LiquidGlassToggle!
-    private var loginToggle: LiquidGlassToggle!
+
+    private var doneStatusLabel: NSTextField!
     private var stepCards: [NSView] = []
-    private var doneBtn: LiquidGlassButton!
-    private var tryBtn: LiquidGlassButton!
+    private var closeBtn: LiquidGlassButton!
+    private var getStartedBtn: LiquidGlassButton!
     private var isRecordingShortcut = false
     nonisolated(unsafe) private var permPollTimer: Timer?
-    nonisolated(unsafe) private var authObserver: NSObjectProtocol?
     nonisolated(unsafe) private var settingsObserver: NSObjectProtocol?
 
     init(frame frameRect: NSRect, onFinish: @escaping (Bool) -> Void) {
@@ -1985,15 +1979,6 @@ private final class OnboardingContentView: NSView {
         super.init(frame: frameRect)
         setupUI()
         refreshAllState(animateCards: false)
-        authObserver = NotificationCenter.default.addObserver(
-            forName: .loopSearchAuthChanged,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.refreshAuthStep()
-            }
-        }
         settingsObserver = NotificationCenter.default.addObserver(
             forName: .circleToSearchSettingsChanged,
             object: nil,
@@ -2001,7 +1986,6 @@ private final class OnboardingContentView: NSView {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.refreshShortcutUI()
-                self?.refreshAppearanceAndBehaviorUI()
             }
         }
         startPermissionPollingIfNeeded()
@@ -2009,9 +1993,6 @@ private final class OnboardingContentView: NSView {
 
     deinit {
         permPollTimer?.invalidate()
-        if let authObserver {
-            NotificationCenter.default.removeObserver(authObserver)
-        }
         if let settingsObserver {
             NotificationCenter.default.removeObserver(settingsObserver)
         }
@@ -2022,7 +2003,7 @@ private final class OnboardingContentView: NSView {
     }
 
     func animateCardsIn() {
-        AppleMotion.staggeredCardsReveal(stepCards, baseDelay: 0.03, stepDelay: 0.042)
+        AppleMotion.staggeredCardsReveal(stepCards, baseDelay: 0.03, stepDelay: 0.045)
     }
 
     func stopTransientActivity() {
@@ -2033,10 +2014,8 @@ private final class OnboardingContentView: NSView {
     }
 
     func refreshAllState(animateCards: Bool) {
-        refreshAuthStep()
         refreshPermissionStatus()
         refreshShortcutUI()
-        refreshAppearanceAndBehaviorUI()
         startPermissionPollingIfNeeded()
         if animateCards {
             animateCardsIn()
@@ -2068,28 +2047,67 @@ private final class OnboardingContentView: NSView {
         }
     }
 
+    private var isPermissionGranted: Bool {
+        CGPreflightScreenCaptureAccess() || captureVerified
+    }
+
     private func startPermissionPollingIfNeeded() {
-        guard !CGPreflightScreenCaptureAccess() else {
+        guard !isPermissionGranted else {
             permPollTimer?.invalidate()
             permPollTimer = nil
             return
         }
         guard permPollTimer == nil else { return }
-        permPollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+        permPollTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.refreshPermissionStatus()
             }
         }
     }
 
-    private func refreshPermissionStatus() {
-        let granted = CGPreflightScreenCaptureAccess()
-        permStatusLabel.stringValue = granted ? "✓ Granted" : "Needs Access"
-        permStatusLabel.textColor = granted ? .systemGreen : .systemOrange
+    private func refreshPermissionStatus(statusOverride: (String, NSColor)? = nil) {
+        let granted = isPermissionGranted
+        if let statusOverride {
+            permStatusLabel.stringValue = statusOverride.0
+            permStatusLabel.textColor = statusOverride.1
+        } else {
+            permStatusLabel.stringValue = granted ? "✓ Granted" : "Needs Access"
+            permStatusLabel.textColor = granted ? .systemGreen : .systemOrange
+        }
         permGrantBtn.title = granted ? "Open Settings" : "Grant Access"
+        permGrantBtn.setSelectedAccent(!granted)
+
+        updateStepBadge(step1BadgeView, label: step1BadgeLabel, number: "1", completed: granted)
+        updateStepBadge(step3BadgeView, label: step3BadgeLabel, number: "3", completed: granted)
+
+        doneStatusLabel.stringValue = granted ? "✓ Ready to search" : "Waiting for Step 1"
+        doneStatusLabel.textColor = granted ? .systemGreen : .secondaryLabelColor
+
+        getStartedBtn.isEnabled = granted
+        getStartedBtn.setSelectedAccent(granted)
+
         if granted {
             permPollTimer?.invalidate()
             permPollTimer = nil
+        }
+    }
+
+    private func runTestCapture() {
+        testCaptureBtn.isEnabled = false
+        permStatusLabel.stringValue = "Testing…"
+        permStatusLabel.textColor = NSColor(red: 0.36, green: 0.84, blue: 1.0, alpha: 1.0)
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await ScreenCaptureService.captureScreen(ScreenCaptureService.activeScreen())
+                self.captureVerified = true
+                self.testCaptureBtn.isEnabled = true
+                self.refreshPermissionStatus(statusOverride: ("✓ Capture OK", .systemGreen))
+            } catch {
+                self.testCaptureBtn.isEnabled = true
+                self.refreshPermissionStatus(statusOverride: ("Needs Access", .systemOrange))
+            }
         }
     }
 
@@ -2100,9 +2118,9 @@ private final class OnboardingContentView: NSView {
             tintColor: NSColor(red: 0.026, green: 0.034, blue: 0.072, alpha: 0.92),
             lightTintColor: NSColor(white: 0.96, alpha: 0.94)
         )
-        card.horizonGlowIntensity = 0.88
-        card.horizonPoolHeightFraction = 0.42
-        card.horizonRimStrength = 1.20
+        card.horizonGlowIntensity = 0.82
+        card.horizonPoolHeightFraction = 0.36
+        card.horizonRimStrength = 1.18
         card.horizonWellView.setContinuousWaveEnabled(true)
         card.frame = bounds
         card.autoresizingMask = [.width, .height]
@@ -2111,170 +2129,152 @@ private final class OnboardingContentView: NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 9
+        stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
         card.contentContainer.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: card.contentContainer.leadingAnchor, constant: 22),
-            stack.trailingAnchor.constraint(equalTo: card.contentContainer.trailingAnchor, constant: -22),
-            stack.topAnchor.constraint(equalTo: card.contentContainer.topAnchor, constant: 20),
-            stack.bottomAnchor.constraint(equalTo: card.contentContainer.bottomAnchor, constant: -16)
+            stack.leadingAnchor.constraint(equalTo: card.contentContainer.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: card.contentContainer.trailingAnchor, constant: -24),
+            stack.topAnchor.constraint(equalTo: card.contentContainer.topAnchor, constant: 22),
+            stack.bottomAnchor.constraint(equalTo: card.contentContainer.bottomAnchor, constant: -18)
         ])
 
         // Header
-        let logo = LoopBrandLogoView(size: 38)
+        let logo = LoopBrandLogoView(size: 42)
         let title = NSTextField(labelWithString: "Welcome to LoopSearch")
-        title.font = .systemFont(ofSize: 20, weight: .bold)
+        title.font = .systemFont(ofSize: 22, weight: .bold)
         title.textColor = .labelColor
 
-        let sub = NSTextField(labelWithString: "Sign in with Google and set up visual screen search, instant OCR, and AI.")
-        sub.font = .systemFont(ofSize: 12, weight: .regular)
+        let sub = NSTextField(wrappingLabelWithString: "No account needed. Your screen stays on your device unless you press Search.")
+        sub.font = .systemFont(ofSize: 13, weight: .regular)
         sub.textColor = .secondaryLabelColor
+        sub.maximumNumberOfLines = 2
+        sub.preferredMaxLayoutWidth = 468
 
         let titleCol = NSStackView(views: [title, sub])
         titleCol.orientation = .vertical
         titleCol.alignment = .leading
-        titleCol.spacing = 2
+        titleCol.spacing = 3
 
         let headerRow = NSStackView(views: [logo, titleCol])
         headerRow.orientation = .horizontal
         headerRow.alignment = .centerY
-        headerRow.spacing = 12
+        headerRow.spacing = 14
         stack.addArrangedSubview(headerRow)
 
-        // Step 1: Google Sign-In (Required)
-        let step1 = makeStepCard(
-            number: "1",
-            title: "Sign in with Google (Required)",
-            subtitle: "Required before using LoopSearch capture & AI features.",
-            subtitleLabelOut: { [weak self] lbl in self?.authSubtitleLabel = lbl }
-        ) {
-            authStatusLabel = NSTextField(labelWithString: "Required")
-            authStatusLabel.font = .systemFont(ofSize: 11, weight: .semibold)
-            authStatusLabel.textColor = .systemOrange
+        // Step 1: Screen Recording Permission
+        let step1 = makeSettingsGlassCard(cornerRadius: 14)
+        let (s1Badge, s1BadgeLabel) = makeStepBadge(number: "1")
+        step1BadgeView = s1Badge
+        step1BadgeLabel = s1BadgeLabel
 
-            authActionBtn = LiquidGlassButton(
-                symbol: "person.crop.circle.badge.checkmark",
-                symbolPointSize: 10.5,
-                symbolWeight: .semibold,
-                title: "Sign in with Google",
-                tooltip: "Authenticate with Google in your browser",
-                height: 26,
-                minWidth: 146,
-                style: .clear,
-                tintColor: NSColor(red: 0.08, green: 0.38, blue: 0.86, alpha: 0.88),
-                lightTintColor: NSColor(red: 0.12, green: 0.44, blue: 0.94, alpha: 0.92),
-                foregroundColor: .white,
-                font: .systemFont(ofSize: 11, weight: .semibold)
-            ) {
-                let auth = FirebaseAuthService.shared
-                if auth.isSigningIn {
-                    auth.cancelSignIn()
-                    return
-                }
-                Task { @MainActor in
-                    _ = await FirebaseAuthService.shared.signInWithGoogle()
-                }
-            }
+        let step1Title = NSTextField(labelWithString: "Screen Recording permission")
+        step1Title.font = .systemFont(ofSize: 14, weight: .semibold)
+        step1Title.textColor = .labelColor
 
-            let row = NSStackView(views: [authStatusLabel, authActionBtn])
-            row.orientation = .horizontal
-            row.alignment = .centerY
-            row.spacing = 6
-            return row
+        let step1Sub = NSTextField(wrappingLabelWithString: "Required to capture regions on screen. Use Test capture after granting permission.")
+        step1Sub.font = .systemFont(ofSize: 12, weight: .regular)
+        step1Sub.textColor = .secondaryLabelColor
+        step1Sub.maximumNumberOfLines = 2
+        step1Sub.preferredMaxLayoutWidth = 310
+
+        let step1TextCol = NSStackView(views: [step1Title, step1Sub])
+        step1TextCol.orientation = .vertical
+        step1TextCol.alignment = .leading
+        step1TextCol.spacing = 3
+        step1TextCol.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        step1TextCol.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let granted = isPermissionGranted
+        permStatusLabel = NSTextField(labelWithString: granted ? "✓ Granted" : "Needs Access")
+        permStatusLabel.font = .systemFont(ofSize: 11.5, weight: .semibold)
+        permStatusLabel.textColor = granted ? .systemGreen : .systemOrange
+        permStatusLabel.alignment = .right
+
+        testCaptureBtn = LiquidGlassButton(
+            title: "Test capture",
+            tooltip: "Verify Screen Recording works right now",
+            height: 26,
+            minWidth: 92,
+            style: .clear,
+            foregroundColor: .labelColor,
+            font: .systemFont(ofSize: 11.5, weight: .medium)
+        ) { [weak self] in
+            self?.runTestCapture()
         }
+
+        permGrantBtn = LiquidGlassButton(
+            symbol: "lock.open.display",
+            symbolPointSize: 11,
+            symbolWeight: .semibold,
+            title: granted ? "Open Settings" : "Grant Access",
+            tooltip: "Open Screen Recording permission prompt or System Settings",
+            height: 28,
+            minWidth: 114,
+            style: .clear,
+            tintColor: NSColor(red: 0.08, green: 0.36, blue: 0.82, alpha: 0.84),
+            lightTintColor: NSColor(red: 0.12, green: 0.44, blue: 0.94, alpha: 0.90),
+            foregroundColor: .white,
+            font: .systemFont(ofSize: 12, weight: .semibold)
+        ) { [weak self] in
+            let ok = CGRequestScreenCaptureAccess()
+            self?.refreshPermissionStatus()
+            self?.startPermissionPollingIfNeeded()
+            if !ok {
+                ScreenCaptureService.openSystemSettings()
+            }
+        }
+
+        let permBtnsRow = NSStackView(views: [testCaptureBtn, permGrantBtn])
+        permBtnsRow.orientation = .horizontal
+        permBtnsRow.alignment = .centerY
+        permBtnsRow.spacing = 7
+
+        let permRightCol = NSStackView(views: [permStatusLabel, permBtnsRow])
+        permRightCol.orientation = .vertical
+        permRightCol.alignment = .trailing
+        permRightCol.spacing = 6
+
+        let step1Spacer = NSView()
+        step1Spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let step1Row = NSStackView(views: [step1BadgeView, step1TextCol, step1Spacer, permRightCol])
+        step1Row.orientation = .horizontal
+        step1Row.alignment = .centerY
+        step1Row.spacing = 12
+        step1Row.translatesAutoresizingMaskIntoConstraints = false
+        step1.contentContainer.addSubview(step1Row)
+        NSLayoutConstraint.activate([
+            step1Row.leadingAnchor.constraint(equalTo: step1.contentContainer.leadingAnchor, constant: 16),
+            step1Row.trailingAnchor.constraint(equalTo: step1.contentContainer.trailingAnchor, constant: -16),
+            step1Row.topAnchor.constraint(equalTo: step1.contentContainer.topAnchor, constant: 14),
+            step1Row.bottomAnchor.constraint(equalTo: step1.contentContainer.bottomAnchor, constant: -14)
+        ])
         stack.addArrangedSubview(step1)
         step1.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        // Step 2: Screen Recording Permission (with Quit & Reopen Dock/Menu Bar tip + live poll)
+        // Step 2: Global Shortcut (Default Double-tap Cmd)
         let step2 = makeSettingsGlassCard(cornerRadius: 14)
-        let step2Badge = makeStepBadge(number: "2")
-        let step2Title = NSTextField(labelWithString: "Grant Screen Recording Permission")
-        step2Title.font = .systemFont(ofSize: 13, weight: .semibold)
+        let (s2Badge, s2BadgeLabel) = makeStepBadge(number: "2")
+        step2BadgeView = s2Badge
+        step2BadgeLabel = s2BadgeLabel
+
+        let step2Title = NSTextField(labelWithString: "Global shortcut")
+        step2Title.font = .systemFont(ofSize: 14, weight: .semibold)
         step2Title.textColor = .labelColor
 
-        let step2Sub = NSTextField(wrappingLabelWithString: "Needed to capture your screen. If macOS asks to Quit & Reopen, find LoopSearch in your Dock or top-right Menu Bar.")
-        step2Sub.font = .systemFont(ofSize: 10.5, weight: .regular)
-        step2Sub.textColor = .secondaryLabelColor
-        step2Sub.maximumNumberOfLines = 2
-        step2Sub.preferredMaxLayoutWidth = 278
+        hotkeyHintLabel = NSTextField(labelWithString: "Default is Double-tap ⌘. Pick a preset or record your own.")
+        hotkeyHintLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        hotkeyHintLabel.textColor = .secondaryLabelColor
+        hotkeyHintLabel.lineBreakMode = .byTruncatingTail
 
-        let step2TextCol = NSStackView(views: [step2Title, step2Sub])
+        let step2TextCol = NSStackView(views: [step2Title, hotkeyHintLabel])
         step2TextCol.orientation = .vertical
         step2TextCol.alignment = .leading
         step2TextCol.spacing = 2
         step2TextCol.setContentHuggingPriority(.defaultLow, for: .horizontal)
         step2TextCol.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let granted = CGPreflightScreenCaptureAccess()
-        permStatusLabel = NSTextField(labelWithString: granted ? "✓ Granted" : "Needs Access")
-        permStatusLabel.font = .systemFont(ofSize: 11, weight: .semibold)
-        permStatusLabel.textColor = granted ? .systemGreen : .systemOrange
-
-        permGrantBtn = LiquidGlassButton(
-            symbol: "lock.open.display",
-            symbolPointSize: 10.5,
-            symbolWeight: .semibold,
-            title: granted ? "Open Settings" : "Grant Access",
-            tooltip: "Request Screen Recording permission",
-            height: 26,
-            minWidth: 108,
-            style: .clear,
-            tintColor: NSColor(red: 0.08, green: 0.36, blue: 0.82, alpha: 0.84),
-            lightTintColor: NSColor(red: 0.12, green: 0.44, blue: 0.94, alpha: 0.90),
-            foregroundColor: .white,
-            font: .systemFont(ofSize: 11, weight: .semibold)
-        ) { [weak self] in
-            let ok = CGRequestScreenCaptureAccess()
-            self?.refreshPermissionStatus()
-            self?.startPermissionPollingIfNeeded()
-            if !ok, let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-                NSWorkspace.shared.open(url)
-            }
-        }
-
-        let permRightRow = NSStackView(views: [permStatusLabel, permGrantBtn])
-        permRightRow.orientation = .horizontal
-        permRightRow.alignment = .centerY
-        permRightRow.spacing = 8
-
-        let step2Spacer = NSView()
-        step2Spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let step2Row = NSStackView(views: [step2Badge, step2TextCol, step2Spacer, permRightRow])
-        step2Row.orientation = .horizontal
-        step2Row.alignment = .centerY
-        step2Row.spacing = 10
-        step2Row.translatesAutoresizingMaskIntoConstraints = false
-        step2.contentContainer.addSubview(step2Row)
-        NSLayoutConstraint.activate([
-            step2Row.leadingAnchor.constraint(equalTo: step2.contentContainer.leadingAnchor, constant: 14),
-            step2Row.trailingAnchor.constraint(equalTo: step2.contentContainer.trailingAnchor, constant: -14),
-            step2Row.topAnchor.constraint(equalTo: step2.contentContainer.topAnchor, constant: 10),
-            step2Row.bottomAnchor.constraint(equalTo: step2.contentContainer.bottomAnchor, constant: -10)
-        ])
-        stack.addArrangedSubview(step2)
-        step2.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-
-        // Step 3: Global Shortcut (Presets + Record Custom Key Combo right on start)
-        let step3 = makeSettingsGlassCard(cornerRadius: 14)
-        let step3Badge = makeStepBadge(number: "3")
-        let step3Title = NSTextField(labelWithString: "Choose or Record Global Shortcut")
-        step3Title.font = .systemFont(ofSize: 13, weight: .semibold)
-        step3Title.textColor = .labelColor
-
-        hotkeyHintLabel = NSTextField(labelWithString: "Pick a quick preset or record your own key combo from start.")
-        hotkeyHintLabel.font = .systemFont(ofSize: 10.5, weight: .regular)
-        hotkeyHintLabel.textColor = .secondaryLabelColor
-        hotkeyHintLabel.lineBreakMode = .byTruncatingTail
-
-        let step3TextCol = NSStackView(views: [step3Title, hotkeyHintLabel])
-        step3TextCol.orientation = .vertical
-        step3TextCol.alignment = .leading
-        step3TextCol.spacing = 1
-        step3TextCol.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        step3TextCol.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let badgePill = NSView()
         badgePill.wantsLayer = true
@@ -2285,36 +2285,36 @@ private final class OnboardingContentView: NSView {
         badgePill.translatesAutoresizingMaskIntoConstraints = false
 
         hotkeyValueLabel = NSTextField(labelWithString: AppSettings.shared.activeHotkeyDisplayString)
-        hotkeyValueLabel.font = .monospacedSystemFont(ofSize: 11.5, weight: .semibold)
+        hotkeyValueLabel.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
         hotkeyValueLabel.textColor = .labelColor
         hotkeyValueLabel.alignment = .center
         hotkeyValueLabel.translatesAutoresizingMaskIntoConstraints = false
         badgePill.addSubview(hotkeyValueLabel)
         NSLayoutConstraint.activate([
-            badgePill.heightAnchor.constraint(equalToConstant: 24),
-            badgePill.widthAnchor.constraint(greaterThanOrEqualToConstant: 82),
-            hotkeyValueLabel.leadingAnchor.constraint(equalTo: badgePill.leadingAnchor, constant: 9),
-            hotkeyValueLabel.trailingAnchor.constraint(equalTo: badgePill.trailingAnchor, constant: -9),
+            badgePill.heightAnchor.constraint(equalToConstant: 26),
+            badgePill.widthAnchor.constraint(greaterThanOrEqualToConstant: 96),
+            hotkeyValueLabel.leadingAnchor.constraint(equalTo: badgePill.leadingAnchor, constant: 10),
+            hotkeyValueLabel.trailingAnchor.constraint(equalTo: badgePill.trailingAnchor, constant: -10),
             hotkeyValueLabel.centerYAnchor.constraint(equalTo: badgePill.centerYAnchor)
         ])
 
-        let step3HeaderSpacer = NSView()
-        step3HeaderSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let step3TopRow = NSStackView(views: [step3Badge, step3TextCol, step3HeaderSpacer, badgePill])
-        step3TopRow.orientation = .horizontal
-        step3TopRow.alignment = .centerY
-        step3TopRow.spacing = 10
+        let step2HeaderSpacer = NSView()
+        step2HeaderSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let step2TopRow = NSStackView(views: [step2BadgeView, step2TextCol, step2HeaderSpacer, badgePill])
+        step2TopRow.orientation = .horizontal
+        step2TopRow.alignment = .centerY
+        step2TopRow.spacing = 12
 
         presetButtons = [:]
-        let presetList: [HotkeyPreset] = [.cmdShiftSpace, .optionSpace, .cmdShiftS]
+        let presetList: [HotkeyPreset] = [.doubleTapCmd, .cmdShiftSpace, .optionSpace]
         let presetBtns: [LiquidGlassButton] = presetList.map { preset in
             let btn = LiquidGlassButton(
                 title: preset.title,
                 tooltip: "Use \(preset.title)",
-                height: 24,
+                height: 27,
                 style: .clear,
                 foregroundColor: .labelColor,
-                font: .systemFont(ofSize: 10.5, weight: .semibold)
+                font: .systemFont(ofSize: 11.5, weight: .semibold)
             ) { [weak self] in
                 self?.isRecordingShortcut = false
                 AppSettings.shared.hotkeyPreset = preset
@@ -2326,189 +2326,127 @@ private final class OnboardingContentView: NSView {
 
         recordHotkeyBtn = LiquidGlassButton(
             symbol: "keyboard",
-            symbolPointSize: 10.5,
+            symbolPointSize: 11,
             symbolWeight: .semibold,
             title: "Record Custom…",
             tooltip: "Press your own custom key combination (e.g. ⌥S, ⌃⌥Space)",
-            height: 24,
-            minWidth: 122,
+            height: 27,
+            minWidth: 126,
             style: .clear,
             tintColor: NSColor(red: 0.08, green: 0.36, blue: 0.82, alpha: 0.84),
             lightTintColor: NSColor(red: 0.12, green: 0.44, blue: 0.94, alpha: 0.90),
             foregroundColor: .white,
-            font: .systemFont(ofSize: 10.5, weight: .semibold)
+            font: .systemFont(ofSize: 11.5, weight: .semibold)
         ) { [weak self] in
             self?.toggleShortcutRecording()
         }
 
-        let step3ControlsSpacer = NSView()
-        step3ControlsSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let step3ControlsRow = NSStackView(views: presetBtns + [step3ControlsSpacer, recordHotkeyBtn])
-        step3ControlsRow.orientation = .horizontal
-        step3ControlsRow.alignment = .centerY
-        step3ControlsRow.spacing = 6
+        let step2ControlsSpacer = NSView()
+        step2ControlsSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let step2ControlsRow = NSStackView(views: presetBtns + [step2ControlsSpacer, recordHotkeyBtn])
+        step2ControlsRow.orientation = .horizontal
+        step2ControlsRow.alignment = .centerY
+        step2ControlsRow.spacing = 7
 
-        let step3VStack = NSStackView(views: [step3TopRow, step3ControlsRow])
-        step3VStack.orientation = .vertical
-        step3VStack.alignment = .leading
-        step3VStack.spacing = 8
-        step3VStack.translatesAutoresizingMaskIntoConstraints = false
-        step3.contentContainer.addSubview(step3VStack)
+        let step2VStack = NSStackView(views: [step2TopRow, step2ControlsRow])
+        step2VStack.orientation = .vertical
+        step2VStack.alignment = .leading
+        step2VStack.spacing = 10
+        step2VStack.translatesAutoresizingMaskIntoConstraints = false
+        step2.contentContainer.addSubview(step2VStack)
         NSLayoutConstraint.activate([
-            step3VStack.leadingAnchor.constraint(equalTo: step3.contentContainer.leadingAnchor, constant: 14),
-            step3VStack.trailingAnchor.constraint(equalTo: step3.contentContainer.trailingAnchor, constant: -14),
-            step3VStack.topAnchor.constraint(equalTo: step3.contentContainer.topAnchor, constant: 10),
-            step3VStack.bottomAnchor.constraint(equalTo: step3.contentContainer.bottomAnchor, constant: -10),
-            step3TopRow.widthAnchor.constraint(equalTo: step3VStack.widthAnchor),
-            step3ControlsRow.widthAnchor.constraint(equalTo: step3VStack.widthAnchor)
+            step2VStack.leadingAnchor.constraint(equalTo: step2.contentContainer.leadingAnchor, constant: 16),
+            step2VStack.trailingAnchor.constraint(equalTo: step2.contentContainer.trailingAnchor, constant: -16),
+            step2VStack.topAnchor.constraint(equalTo: step2.contentContainer.topAnchor, constant: 14),
+            step2VStack.bottomAnchor.constraint(equalTo: step2.contentContainer.bottomAnchor, constant: -14),
+            step2TopRow.widthAnchor.constraint(equalTo: step2VStack.widthAnchor),
+            step2ControlsRow.widthAnchor.constraint(equalTo: step2VStack.widthAnchor)
+        ])
+        stack.addArrangedSubview(step2)
+        step2.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+
+        // Step 3: Done
+        let step3 = makeSettingsGlassCard(cornerRadius: 14)
+        let (s3Badge, s3BadgeLabel) = makeStepBadge(number: "3")
+        step3BadgeView = s3Badge
+        step3BadgeLabel = s3BadgeLabel
+
+        let step3Title = NSTextField(labelWithString: "Done")
+        step3Title.font = .systemFont(ofSize: 14, weight: .semibold)
+        step3Title.textColor = .labelColor
+
+        let step3Sub = NSTextField(labelWithString: "Customize theme, results browser, Dock visibility, and optional AI sync anytime in Settings.")
+        step3Sub.font = .systemFont(ofSize: 12, weight: .regular)
+        step3Sub.textColor = .secondaryLabelColor
+        step3Sub.lineBreakMode = .byTruncatingTail
+
+        let step3TextCol = NSStackView(views: [step3Title, step3Sub])
+        step3TextCol.orientation = .vertical
+        step3TextCol.alignment = .leading
+        step3TextCol.spacing = 2
+        step3TextCol.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        step3TextCol.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        doneStatusLabel = NSTextField(labelWithString: granted ? "✓ Ready to search" : "Waiting for Step 1")
+        doneStatusLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        doneStatusLabel.textColor = granted ? .systemGreen : .secondaryLabelColor
+        doneStatusLabel.setContentHuggingPriority(.required, for: .horizontal)
+        doneStatusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let step3Spacer = NSView()
+        step3Spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let step3Row = NSStackView(views: [step3BadgeView, step3TextCol, step3Spacer, doneStatusLabel])
+        step3Row.orientation = .horizontal
+        step3Row.alignment = .centerY
+        step3Row.spacing = 12
+        step3Row.translatesAutoresizingMaskIntoConstraints = false
+        step3.contentContainer.addSubview(step3Row)
+        NSLayoutConstraint.activate([
+            step3Row.leadingAnchor.constraint(equalTo: step3.contentContainer.leadingAnchor, constant: 16),
+            step3Row.trailingAnchor.constraint(equalTo: step3.contentContainer.trailingAnchor, constant: -16),
+            step3Row.topAnchor.constraint(equalTo: step3.contentContainer.topAnchor, constant: 14),
+            step3Row.bottomAnchor.constraint(equalTo: step3.contentContainer.bottomAnchor, constant: -14)
         ])
         stack.addArrangedSubview(step3)
         step3.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        // Step 4: App Theme, Results Browser Mode & Quick Visibility Toggles
-        let step4 = makeSettingsGlassCard(cornerRadius: 14)
-        let step4Badge = makeStepBadge(number: "4")
-        let step4Title = NSTextField(labelWithString: "Appearance, Results Browser & Visibility")
-        step4Title.font = .systemFont(ofSize: 13, weight: .semibold)
-        step4Title.textColor = .labelColor
-
-        let step4Sub = NSTextField(labelWithString: "Choose Dark / Light mode for LoopSearch and Google Lens results, and keep icon accessible.")
-        step4Sub.font = .systemFont(ofSize: 10.5, weight: .regular)
-        step4Sub.textColor = .secondaryLabelColor
-        step4Sub.lineBreakMode = .byTruncatingTail
-
-        let step4TextCol = NSStackView(views: [step4Title, step4Sub])
-        step4TextCol.orientation = .vertical
-        step4TextCol.alignment = .leading
-        step4TextCol.spacing = 1
-        step4TextCol.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        step4TextCol.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let step4TopRow = NSStackView(views: [step4Badge, step4TextCol])
-        step4TopRow.orientation = .horizontal
-        step4TopRow.alignment = .centerY
-        step4TopRow.spacing = 10
-
-        let themeOptions = AppTheme.allCases.map {
-            LiquidGlassSegmentedControl.Option(title: $0.title, symbol: $0.symbolName)
-        }
-
-        let appThemeLabel = NSTextField(labelWithString: "App & Glass Theme")
-        appThemeLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
-        appThemeLabel.textColor = .labelColor
-        appThemeSegment = LiquidGlassSegmentedControl(
-            options: themeOptions,
-            selectedIndex: AppTheme.allCases.firstIndex(of: AppSettings.shared.theme) ?? 0,
-            height: 24,
-            compact: true
-        ) { idx in
-            guard AppTheme.allCases.indices.contains(idx) else { return }
-            AppSettings.shared.theme = AppTheme.allCases[idx]
-        }
-        let appThemeSpacer = NSView()
-        appThemeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let appThemeRow = NSStackView(views: [appThemeLabel, appThemeSpacer, appThemeSegment])
-        appThemeRow.orientation = .horizontal
-        appThemeRow.alignment = .centerY
-
-        let webThemeLabel = NSTextField(labelWithString: "Results Browser Page")
-        webThemeLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
-        webThemeLabel.textColor = .labelColor
-        webThemeSegment = LiquidGlassSegmentedControl(
-            options: themeOptions,
-            selectedIndex: AppTheme.allCases.firstIndex(of: AppSettings.shared.webResultsTheme) ?? 0,
-            height: 24,
-            compact: true
-        ) { idx in
-            guard AppTheme.allCases.indices.contains(idx) else { return }
-            AppSettings.shared.webResultsTheme = AppTheme.allCases[idx]
-        }
-        let webThemeSpacer = NSView()
-        webThemeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let webThemeRow = NSStackView(views: [webThemeLabel, webThemeSpacer, webThemeSegment])
-        webThemeRow.orientation = .horizontal
-        webThemeRow.alignment = .centerY
-
-        keepDockToggle = LiquidGlassToggle(isOn: !AppSettings.shared.hideDockIcon) { isOn in
-            AppSettings.shared.hideDockIcon = !isOn
-        }
-        let keepDockLabel = NSTextField(labelWithString: "Keep in Dock (recommended)")
-        keepDockLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        keepDockLabel.textColor = .secondaryLabelColor
-
-        loginToggle = LiquidGlassToggle(isOn: AppSettings.shared.launchAtLogin) { isOn in
-            AppSettings.shared.launchAtLogin = isOn
-        }
-        let loginLabel = NSTextField(labelWithString: "Launch at Login")
-        loginLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        loginLabel.textColor = .secondaryLabelColor
-
-        let behaviorSpacer = NSView()
-        behaviorSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let behaviorRow = NSStackView(views: [keepDockToggle, keepDockLabel, behaviorSpacer, loginToggle, loginLabel])
-        behaviorRow.orientation = .horizontal
-        behaviorRow.alignment = .centerY
-        behaviorRow.spacing = 7
-
-        let step4VStack = NSStackView(views: [step4TopRow, appThemeRow, webThemeRow, behaviorRow])
-        step4VStack.orientation = .vertical
-        step4VStack.alignment = .leading
-        step4VStack.spacing = 7
-        step4VStack.translatesAutoresizingMaskIntoConstraints = false
-        step4.contentContainer.addSubview(step4VStack)
-        NSLayoutConstraint.activate([
-            step4VStack.leadingAnchor.constraint(equalTo: step4.contentContainer.leadingAnchor, constant: 14),
-            step4VStack.trailingAnchor.constraint(equalTo: step4.contentContainer.trailingAnchor, constant: -14),
-            step4VStack.topAnchor.constraint(equalTo: step4.contentContainer.topAnchor, constant: 10),
-            step4VStack.bottomAnchor.constraint(equalTo: step4.contentContainer.bottomAnchor, constant: -10),
-            step4TopRow.widthAnchor.constraint(equalTo: step4VStack.widthAnchor),
-            appThemeRow.widthAnchor.constraint(equalTo: step4VStack.widthAnchor),
-            webThemeRow.widthAnchor.constraint(equalTo: step4VStack.widthAnchor),
-            behaviorRow.widthAnchor.constraint(equalTo: step4VStack.widthAnchor)
-        ])
-        stack.addArrangedSubview(step4)
-        step4.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-
-        let supportCard = makeCreatorSupportCard(compact: true)
-        stack.addArrangedSubview(supportCard)
-        supportCard.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-
-        stepCards = [step1, step2, step3, step4, supportCard]
+        stepCards = [step1, step2, step3]
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
         stack.addArrangedSubview(spacer)
 
         // Bottom Buttons
-        let note = NSTextField(labelWithString: "Independent macOS app • Not affiliated with Google LLC")
-        note.font = .systemFont(ofSize: 10.5, weight: .regular)
+        let note = NSTextField(labelWithString: "Independent macOS app - Not affiliated with Google LLC")
+        note.font = .systemFont(ofSize: 11.5, weight: .regular)
         note.textColor = .secondaryLabelColor
 
-        doneBtn = LiquidGlassButton(
+        closeBtn = LiquidGlassButton(
             title: "Close",
             tooltip: "Close welcome guide",
-            height: 30,
+            height: 32,
             minWidth: 74,
             style: .clear,
             foregroundColor: .labelColor,
-            font: .systemFont(ofSize: 12, weight: .semibold)
+            font: .systemFont(ofSize: 12.5, weight: .semibold)
         ) { [weak self] in
             self?.onFinish(false)
         }
 
-        tryBtn = LiquidGlassButton(
+        getStartedBtn = LiquidGlassButton(
             symbol: "sparkles",
-            symbolPointSize: 11.5,
+            symbolPointSize: 12,
             symbolWeight: .semibold,
-            title: "Sign In to Continue",
-            tooltip: "Sign in with Google and start using LoopSearch",
-            height: 30,
-            minWidth: 168,
+            title: "Get started",
+            tooltip: "Start using LoopSearch (requires Screen Recording permission)",
+            height: 32,
+            minWidth: 136,
             style: .clear,
             tintColor: NSColor(red: 0.08, green: 0.38, blue: 0.86, alpha: 0.86),
             lightTintColor: NSColor(red: 0.12, green: 0.44, blue: 0.94, alpha: 0.92),
             foregroundColor: .white,
-            font: .systemFont(ofSize: 12, weight: .semibold)
+            font: .systemFont(ofSize: 12.5, weight: .semibold)
         ) { [weak self] in
             self?.onFinish(true)
         }
@@ -2516,57 +2454,12 @@ private final class OnboardingContentView: NSView {
         let hSpacer = NSView()
         hSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let footer = NSStackView(views: [note, hSpacer, doneBtn, tryBtn])
+        let footer = NSStackView(views: [note, hSpacer, closeBtn, getStartedBtn])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.spacing = 8
         stack.addArrangedSubview(footer)
         footer.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-    }
-
-    private func refreshAuthStep() {
-        let auth = FirebaseAuthService.shared
-
-        if let session = auth.session {
-            authStatusLabel.stringValue = "✓ Signed In"
-            authStatusLabel.textColor = .systemGreen
-            let detail = session.email.isEmpty ? session.effectiveDisplayName : "\(session.effectiveDisplayName) (\(session.email))"
-            authSubtitleLabel.stringValue = detail
-            authSubtitleLabel.textColor = .secondaryLabelColor
-            authActionBtn.title = auth.isSigningIn ? "Cancel" : "Switch"
-            authActionBtn.setSelectedAccent(false)
-
-            doneBtn.title = "Done"
-            tryBtn.title = "Try LoopSearch Now"
-            tryBtn.setSelectedAccent(true)
-        } else if auth.isSigningIn {
-            authStatusLabel.stringValue = "In Browser"
-            authStatusLabel.textColor = NSColor(red: 0.36, green: 0.84, blue: 1.0, alpha: 1.0)
-            authSubtitleLabel.stringValue = "Finish Google sign-in in your browser, then return here."
-            authSubtitleLabel.textColor = .secondaryLabelColor
-            authActionBtn.title = "Cancel"
-            authActionBtn.setSelectedAccent(false)
-
-            doneBtn.title = "Close"
-            tryBtn.title = "Waiting for Sign-In…"
-            tryBtn.setSelectedAccent(false)
-        } else {
-            authStatusLabel.stringValue = "Required"
-            authStatusLabel.textColor = .systemOrange
-            if let err = auth.lastAuthError, !err.isEmpty {
-                authSubtitleLabel.stringValue = err
-                authSubtitleLabel.textColor = .systemOrange
-            } else {
-                authSubtitleLabel.stringValue = "Sign in once (name & email only) — works offline afterward."
-                authSubtitleLabel.textColor = .secondaryLabelColor
-            }
-            authActionBtn.title = "Sign in with Google"
-            authActionBtn.setSelectedAccent(true)
-
-            doneBtn.title = "Close"
-            tryBtn.title = "Sign In to Continue"
-            tryBtn.setSelectedAccent(true)
-        }
     }
 
     private func toggleShortcutRecording() {
@@ -2577,6 +2470,7 @@ private final class OnboardingContentView: NSView {
             hotkeyValueLabel.stringValue = "Listening…"
             hotkeyHintLabel.stringValue = "Hold ⌘/⌥/⌃/⇧ + a key (e.g. ⌥S). Press Esc to cancel."
             hotkeyHintLabel.textColor = .systemCyan
+            updateStepBadge(step2BadgeView, label: step2BadgeLabel, number: "2", completed: false)
         } else {
             refreshShortcutUI()
         }
@@ -2594,6 +2488,8 @@ private final class OnboardingContentView: NSView {
             btn.setSelectedAccent(preset == activePreset)
         }
 
+        updateStepBadge(step2BadgeView, label: step2BadgeLabel, number: "2", completed: true)
+
         if let warning = activePreset?.commonUsageWarning {
             hotkeyHintLabel.stringValue = "Tip: \(warning)"
             hotkeyHintLabel.textColor = .systemOrange
@@ -2601,27 +2497,15 @@ private final class OnboardingContentView: NSView {
             hotkeyHintLabel.stringValue = "Custom shortcut active: \(s.activeHotkeyDisplayString) (click a preset to switch)"
             hotkeyHintLabel.textColor = .secondaryLabelColor
         } else {
-            hotkeyHintLabel.stringValue = "Pick a quick preset or record your own key combo from start."
+            hotkeyHintLabel.stringValue = "Default is Double-tap ⌘. Pick a preset or record your own."
             hotkeyHintLabel.textColor = .secondaryLabelColor
         }
     }
 
-    private func refreshAppearanceAndBehaviorUI() {
-        let s = AppSettings.shared
-        if let idx = AppTheme.allCases.firstIndex(of: s.theme) {
-            appThemeSegment.setSelectedIndex(idx, animated: false)
-        }
-        if let idx = AppTheme.allCases.firstIndex(of: s.webResultsTheme) {
-            webThemeSegment.setSelectedIndex(idx, animated: false)
-        }
-        keepDockToggle.isOn = !s.hideDockIcon
-        loginToggle.isOn = s.launchAtLogin
-    }
-
-    private func makeStepBadge(number: String) -> NSView {
+    private func makeStepBadge(number: String) -> (NSView, NSTextField) {
         let badge = NSView()
         badge.wantsLayer = true
-        badge.layer?.cornerRadius = 12
+        badge.layer?.cornerRadius = 13
         badge.layer?.backgroundColor = NSColor(red: 0.10, green: 0.42, blue: 0.92, alpha: 0.26).cgColor
         badge.layer?.borderWidth = 0.75
         badge.layer?.borderColor = NSColor(red: 0.30, green: 0.84, blue: 1.0, alpha: 0.30).cgColor
@@ -2632,68 +2516,33 @@ private final class OnboardingContentView: NSView {
         badge.setContentCompressionResistancePriority(.required, for: .vertical)
 
         let badgeLabel = NSTextField(labelWithString: number)
-        badgeLabel.font = .systemFont(ofSize: 12.5, weight: .bold)
+        badgeLabel.font = .systemFont(ofSize: 13, weight: .bold)
         badgeLabel.textColor = NSColor(red: 0.30, green: 0.84, blue: 1.0, alpha: 1)
         badgeLabel.alignment = .center
         badgeLabel.translatesAutoresizingMaskIntoConstraints = false
         badge.addSubview(badgeLabel)
 
         NSLayoutConstraint.activate([
-            badge.widthAnchor.constraint(equalToConstant: 24),
-            badge.heightAnchor.constraint(equalToConstant: 24),
+            badge.widthAnchor.constraint(equalToConstant: 26),
+            badge.heightAnchor.constraint(equalToConstant: 26),
             badgeLabel.centerXAnchor.constraint(equalTo: badge.centerXAnchor),
             badgeLabel.centerYAnchor.constraint(equalTo: badge.centerYAnchor)
         ])
-        return badge
+        return (badge, badgeLabel)
     }
 
-    private func makeStepCard(
-        number: String,
-        title: String,
-        subtitle: String,
-        subtitleLabelOut: ((NSTextField) -> Void)? = nil,
-        rightView: () -> NSView
-    ) -> NSView {
-        let card = makeSettingsGlassCard(cornerRadius: 14)
-        card.heightAnchor.constraint(equalToConstant: 68).isActive = true
-
-        let badge = makeStepBadge(number: number)
-
-        let tLabel = NSTextField(labelWithString: title)
-        tLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        tLabel.textColor = .labelColor
-
-        let sLabel = NSTextField(labelWithString: subtitle)
-        sLabel.font = .systemFont(ofSize: 11, weight: .regular)
-        sLabel.textColor = .secondaryLabelColor
-        sLabel.lineBreakMode = .byTruncatingMiddle
-        subtitleLabelOut?(sLabel)
-
-        let textCol = NSStackView(views: [tLabel, sLabel])
-        textCol.orientation = .vertical
-        textCol.alignment = .leading
-        textCol.spacing = 2
-        textCol.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        textCol.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let control = rightView()
-        let row = NSStackView(views: [badge, textCol, spacer, control])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 10
-        row.translatesAutoresizingMaskIntoConstraints = false
-        card.contentContainer.addSubview(row)
-
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: card.contentContainer.leadingAnchor, constant: 14),
-            row.trailingAnchor.constraint(equalTo: card.contentContainer.trailingAnchor, constant: -14),
-            row.centerYAnchor.constraint(equalTo: card.contentContainer.centerYAnchor)
-        ])
-
-        return card
+    private func updateStepBadge(_ badge: NSView, label: NSTextField, number: String, completed: Bool) {
+        if completed {
+            label.stringValue = "✓"
+            label.textColor = .systemGreen
+            badge.layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.20).cgColor
+            badge.layer?.borderColor = NSColor.systemGreen.withAlphaComponent(0.50).cgColor
+        } else {
+            label.stringValue = number
+            label.textColor = NSColor(red: 0.30, green: 0.84, blue: 1.0, alpha: 1)
+            badge.layer?.backgroundColor = NSColor(red: 0.10, green: 0.42, blue: 0.92, alpha: 0.26).cgColor
+            badge.layer?.borderColor = NSColor(red: 0.30, green: 0.84, blue: 1.0, alpha: 0.30).cgColor
+        }
     }
 }
 

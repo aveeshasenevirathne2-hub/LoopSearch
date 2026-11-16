@@ -830,7 +830,7 @@ final class AppSettings {
 
     var hotkeyPreset: HotkeyPreset {
         get {
-            defaults.string(forKey: "hotkeyPreset").flatMap(HotkeyPreset.init(rawValue:)) ?? .cmdShiftSpace
+            defaults.string(forKey: "hotkeyPreset").flatMap(HotkeyPreset.init(rawValue:)) ?? .doubleTapCmd
         }
         set {
             defaults.set(newValue.rawValue, forKey: "hotkeyPreset")

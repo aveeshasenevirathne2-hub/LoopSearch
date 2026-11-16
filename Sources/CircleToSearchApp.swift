@@ -155,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
-        if !AppSettings.shared.hasCompletedOnboarding || !FirebaseAuthService.shared.isSignedIn {
+        if !AppSettings.shared.hasCompletedOnboarding {
             OnboardingWindowController.shared.show { [weak self] in
                 self?.triggerCircleToSearch()
             }
@@ -213,7 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard !isOverlayOpen else { return true }
         if !flag {
-            if !FirebaseAuthService.shared.isSignedIn || !AppSettings.shared.hasCompletedOnboarding {
+            if !AppSettings.shared.hasCompletedOnboarding {
                 openOnboarding()
             } else {
                 openSettings()
@@ -276,9 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        let triggerTitle = FirebaseAuthService.shared.isSignedIn
-            ? "Start LoopSearch (\(AppSettings.shared.activeHotkeyDisplayString))"
-            : "Start LoopSearch (Sign In Required)"
+        let triggerTitle = "Start LoopSearch (\(AppSettings.shared.activeHotkeyDisplayString))"
         let triggerItem = NSMenuItem(
             title: triggerTitle,
             action: #selector(triggerFromMenu),
@@ -762,14 +760,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @discardableResult
     private func ensureSignedInOrPrompt() -> Bool {
-        if FirebaseAuthService.shared.isSignedIn {
-            return true
-        }
-        toastController.show(message: "Sign in with Google required to use LoopSearch", duration: 2.8)
-        OnboardingWindowController.shared.show { [weak self] in
-            self?.triggerCircleToSearch()
-        }
-        return false
+        // No account required — user can search immediately once Screen Recording permission is granted.
+        return true
     }
 }
 
@@ -893,22 +885,50 @@ private final class MenuBarArrowCalloutController {
     private var window: NSPanel?
     private var dismissTask: Task<Void, Never>?
 
+    private func rectContainsMenuBar(_ screen: NSScreen, _ rect: NSRect?) -> Bool {
+        guard let rect, rect.width > 4 else { return false }
+        return rect.midX >= screen.frame.minX && rect.midX <= screen.frame.maxX
+            && rect.minY >= screen.visibleFrame.maxY - 6 && rect.maxY <= screen.frame.maxY + 4
+    }
+
     func show(pointingAt statusItemRect: NSRect?, message: String) {
         dismissTask?.cancel()
         window?.orderOut(nil)
 
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        let width: CGFloat = 310
-        let height: CGFloat = 118
-        let targetX: CGFloat
-        let targetY: CGFloat
-        if let rect = statusItemRect {
-            targetX = max(screen.frame.minX + 16, min(screen.frame.maxX - width - 14, rect.maxX - width + 32))
-            targetY = rect.minY - height - 4
+        guard let screen = NSScreen.screens.first(where: { rectContainsMenuBar($0, statusItemRect) })
+            ?? NSScreen.main
+            ?? NSScreen.screens.first else { return }
+        let width: CGFloat = 316
+        let height: CGFloat = 122
+
+        // Locate exact screen X/Y of the Menu Bar icon; handle collapsed/offscreen menu-bar managers cleanly
+        let hasValidStatusRect: Bool
+        let anchorMidX: CGFloat
+        let anchorMinY: CGFloat
+        if let rect = statusItemRect,
+           rect.width > 4,
+           rect.minY >= screen.visibleFrame.maxY - 4,
+           rect.midX >= screen.frame.minX + 60,
+           rect.midX <= screen.frame.maxX - 4 {
+            hasValidStatusRect = true
+            anchorMidX = rect.midX
+            anchorMinY = rect.minY
         } else {
-            targetX = screen.visibleFrame.maxX - width - 22
-            targetY = screen.visibleFrame.maxY - height - 6
+            hasValidStatusRect = false
+            anchorMidX = screen.frame.maxX - 180
+            anchorMinY = screen.visibleFrame.maxY
         }
+
+        let desiredTipOffsetInPanel: CGFloat = width - 48
+        let rawX = anchorMidX - desiredTipOffsetInPanel
+        let targetX = max(screen.frame.minX + 16, min(screen.frame.maxX - width - 12, rawX))
+        let targetY = anchorMinY - height - 4
+
+        let arrowHostWidth: CGFloat = 68
+        let arrowHostHeight: CGFloat = 56
+        let localTipX = max(44, min(width - 18, anchorMidX - targetX))
+        let arrowTipLocalX: CGFloat = 48
+        let arrowHostX = max(width - 130, min(width - arrowHostWidth, localTipX - arrowTipLocalX))
 
         let panel = NSPanel(
             contentRect: NSRect(x: targetX, y: targetY, width: width, height: height),
@@ -925,17 +945,33 @@ private final class MenuBarArrowCalloutController {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         root.wantsLayer = true
 
-        // Curved animated cyan/blue arrow pointing up-right toward the Menu Bar icon
-        let arrowHost = NSView(frame: NSRect(x: width - 86, y: height - 56, width: 64, height: 54))
+        // Curved animated cyan/blue arrow pointing tangentially to anchorMidX on the Menu Bar
+        let arrowHost = NSView(frame: NSRect(x: arrowHostX, y: height - arrowHostHeight - 2, width: arrowHostWidth, height: arrowHostHeight))
         arrowHost.wantsLayer = true
         let arrowLayer = CAShapeLayer()
         let path = CGMutablePath()
-        path.move(to: CGPoint(x: 10, y: 6))
-        path.addQuadCurve(to: CGPoint(x: 44, y: 48), control: CGPoint(x: 8, y: 42))
-        // Arrowhead
-        path.move(to: CGPoint(x: 34, y: 40))
-        path.addLine(to: CGPoint(x: 44, y: 48))
-        path.addLine(to: CGPoint(x: 49, y: 35))
+        let startPt = CGPoint(x: hasValidStatusRect ? 14 : 12, y: 4)
+        let ctrlPt = CGPoint(x: 10, y: 34)
+        let tipPt = CGPoint(x: arrowTipLocalX, y: 50)
+        path.move(to: startPt)
+        path.addQuadCurve(to: tipPt, control: ctrlPt)
+
+        // Compute exact unit tangent at curve end for a symmetrical arrowhead
+        let tx = tipPt.x - ctrlPt.x
+        let ty = tipPt.y - ctrlPt.y
+        let len = max(hypot(tx, ty), 1.0)
+        let ux = tx / len
+        let uy = ty / len
+        let px = -uy
+        let py = ux
+        let wingBack: CGFloat = 12.5
+        let wingSpread: CGFloat = 8.0
+        let leftWing = CGPoint(x: tipPt.x - ux * wingBack + px * wingSpread, y: tipPt.y - uy * wingBack + py * wingSpread)
+        let rightWing = CGPoint(x: tipPt.x - ux * wingBack - px * wingSpread, y: tipPt.y - uy * wingBack - py * wingSpread)
+        path.move(to: leftWing)
+        path.addLine(to: tipPt)
+        path.addLine(to: rightWing)
+
         arrowLayer.path = path
         arrowLayer.strokeColor = NSColor(red: 0.08, green: 0.64, blue: 1.0, alpha: 0.98).cgColor
         arrowLayer.fillColor = NSColor.clear.cgColor

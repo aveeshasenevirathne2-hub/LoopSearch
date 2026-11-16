@@ -1564,6 +1564,18 @@ final class LiquidGlassButton: NSView {
     private var isHovered = false
     private var isPressed = false
 
+    var isEnabled: Bool = true {
+        didSet {
+            if !isEnabled {
+                isHovered = false
+                isPressed = false
+                setFloatingTooltipVisible(false)
+            }
+            alphaValue = isEnabled ? 1.0 : 0.45
+            updateInteractionAppearance(animated: false)
+        }
+    }
+
     var title: String {
         get { titleLabel.stringValue }
         set {
@@ -1766,7 +1778,7 @@ final class LiquidGlassButton: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard !isHidden, alphaValue > 0.01 else { return nil }
+        guard isEnabled, !isHidden, alphaValue > 0.01 else { return nil }
         let localPoint = convert(point, from: superview)
         return bounds.contains(localPoint) ? self : nil
     }
@@ -1853,6 +1865,7 @@ final class LiquidGlassButton: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
         isPressed = true
         setFloatingTooltipVisible(false)
         updateInteractionAppearance(animated: true)
@@ -1938,6 +1951,10 @@ final class LiquidGlassButton: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        guard isEnabled else {
+            isPressed = false
+            return
+        }
         let inside = bounds.contains(convert(event.locationInWindow, from: nil))
         let shouldFire = isPressed && inside
         isPressed = false
