@@ -3316,17 +3316,17 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                 st.textContent = `
                     :root, html, body {
                         color-scheme: dark !important;
-                        background-color: #090e1a !important;
-                        color: #edf2fb !important;
+                        background-color: #0b0b0d !important;
+                        color: #e8eaed !important;
                     }
                     code, pre, kbd, samp, tt {
-                        background-color: rgba(30, 44, 72, 0.86) !important;
-                        color: #d6e8ff !important;
-                        border-color: rgba(130, 175, 255, 0.24) !important;
+                        background-color: rgba(32, 33, 36, 0.92) !important;
+                        color: #e8eaed !important;
+                        border-color: rgba(255, 255, 255, 0.14) !important;
                     }
                     mark, mark * {
-                        background-color: rgba(56, 189, 248, 0.14) !important;
-                        color: #edf2fb !important;
+                        background-color: rgba(255, 255, 255, 0.12) !important;
+                        color: #e8eaed !important;
                         border-radius: 4px !important;
                     }
                     code *, pre *, kbd *, samp * {
@@ -3334,34 +3334,27 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                         color: inherit !important;
                     }
                     table, th, td, blockquote, details, summary {
-                        background-color: rgba(17, 25, 42, 0.86) !important;
-                        color: #edf2fb !important;
-                        border-color: rgba(130, 175, 255, 0.18) !important;
+                        background-color: rgba(24, 25, 28, 0.92) !important;
+                        color: #e8eaed !important;
+                        border-color: rgba(255, 255, 255, 0.12) !important;
                     }
                     input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([type="range"]),
                     textarea {
                         background-color: transparent !important;
                         background-image: none !important;
-                        color: #edf2fb !important;
-                        caret-color: #5cb8ff !important;
+                        color: #e8eaed !important;
+                        caret-color: #e8eaed !important;
                         border-color: transparent !important;
                         box-shadow: none !important;
                         outline: none !important;
                     }
                     input::placeholder, textarea::placeholder {
-                        color: #93a7c4 !important;
-                    }
-                    a, a * { color: #7cc4ff !important; }
-                    a, a * {
-                        text-decoration-style: solid !important;
-                        text-decoration-thickness: 1px !important;
-                        text-underline-offset: 2px !important;
+                        color: #9aa0a6 !important;
                     }
                     a:not([role="button"]), a:not([role="button"]) * {
                         background-color: transparent !important;
                         background-image: none !important;
                     }
-                    svg { color: #a8caf5; }
                 `;
                 (document.head || document.documentElement).appendChild(st);
             }
@@ -3381,7 +3374,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                     if (bgi && bgi.indexOf('gradient(') !== -1 && bgi.indexOf('url(') === -1 && /(255|248|249|250|241|243|244|238|232|229)/.test(bgi)) {
                         var hasMaskBg = (el.textContent || '').trim().length < 36 && el.querySelector('img, textarea, input') === null;
                         if (hasMaskBg) {
-                            el.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(9, 14, 26, 0), rgba(9, 14, 26, 0.96))', 'important');
+                            el.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(11, 11, 13, 0), rgba(11, 11, 13, 0.96))', 'important');
                             el.setAttribute('data-cts-dark-bgi', '1');
                         }
                     }
@@ -3401,19 +3394,19 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                             var hasBorder = parseFloat(cs.borderTopWidth) > 0.2 || parseFloat(cs.borderBottomWidth) > 0.2 || parseFloat(cs.borderLeftWidth) > 0.2 || parseFloat(cs.borderRightWidth) > 0.2;
                             if ((el.tagName === 'SPAN' || el.tagName === 'EM') && a > 0.15 && b > 135 && (b - r) > 38 && g < 195) {
                                 var wrapsLink = el.querySelector('a') !== null || el.closest('a') !== null;
-                                el.style.setProperty('background-color', wrapsLink ? 'transparent' : 'rgba(56, 189, 248, 0.14)', 'important');
+                                el.style.setProperty('background-color', wrapsLink ? 'transparent' : 'rgba(255, 255, 255, 0.10)', 'important');
                                 el.setAttribute('data-cts-dark-bg', '1');
                             } else if (a > 0.12 && r > 155 && g > 155 && b > 155) {
                                 var isRoot = (el.tagName === 'BODY' || el.tagName === 'MAIN');
-                                el.style.setProperty('background-color', isRoot ? '#090e1a' : 'rgba(17, 25, 42, 0.92)', 'important');
+                                el.style.setProperty('background-color', isRoot ? '#0b0b0d' : 'rgba(24, 25, 28, 0.94)', 'important');
                                 if (hasBorder) {
-                                    el.style.setProperty('border-color', 'rgba(130, 175, 255, 0.16)', 'important');
+                                    el.style.setProperty('border-color', 'rgba(255, 255, 255, 0.12)', 'important');
                                 }
                                 el.setAttribute('data-cts-dark-bg', '1');
                             } else if (a > 0.72 && Math.max(r, g, b) <= 52 && (Math.max(r, g, b) - Math.min(r, g, b)) <= 10) {
                                 var rect = el.getBoundingClientRect();
                                 if (rect.width >= vw * 0.84) {
-                                    el.style.setProperty('background-color', '#090e1a', 'important');
+                                    el.style.setProperty('background-color', '#0b0b0d', 'important');
                                     el.setAttribute('data-cts-dark-bg', '1');
                                 }
                             }
@@ -3426,7 +3419,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                             var fr = +fm[1], fgv = +fm[2], fb = +fm[3];
                             if (Math.max(fr, fgv, fb) < 168) {
                                 var isSecondary = Math.min(fr, fgv, fb) > 78;
-                                el.style.setProperty('color', isSecondary ? '#b6c7df' : '#edf2fb', 'important');
+                                el.style.setProperty('color', isSecondary ? '#9aa0a6' : '#e8eaed', 'important');
                                 el.setAttribute('data-cts-dark-fg', '1');
                             }
                         }
@@ -3448,8 +3441,8 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                         p = p.parentElement;
                     }
                     if (pill) {
-                        pill.style.setProperty('background-color', 'rgba(22, 32, 54, 0.96)', 'important');
-                        pill.style.setProperty('border', '1px solid rgba(130, 175, 255, 0.24)', 'important');
+                        pill.style.setProperty('background-color', 'rgba(24, 25, 28, 0.96)', 'important');
+                        pill.style.setProperty('border', '1px solid rgba(255, 255, 255, 0.14)', 'important');
                         pill.style.setProperty('border-radius', '20px', 'important');
                         pill.style.setProperty('box-shadow', '0 4px 18px rgba(0, 0, 0, 0.35)', 'important');
                         pill.style.setProperty('overflow', 'hidden', 'important');
