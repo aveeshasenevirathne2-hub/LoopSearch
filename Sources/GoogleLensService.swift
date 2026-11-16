@@ -27,8 +27,8 @@ enum GoogleLensError: LocalizedError {
 }
 
 enum GoogleLensService {
-    // Mobile Safari UA ensures Google Lens renders compact 2-column visual cards (like Android Circle to Search)
-    static let mobileUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+    // Standard desktop Safari UA so Google Lens serves the clean desktop multi-column results layout
+    static let desktopSafariUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
 
     static func uploadImage(_ image: CGImage, existingCookies: [HTTPCookie] = []) async throws -> LensUploadResult {
         guard let imageData = encodeOptimizedJPEG(image) else {
@@ -52,7 +52,7 @@ enum GoogleLensService {
         request.httpBody = body
         request.timeoutInterval = 20
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.setValue(mobileUserAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(desktopSafariUserAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("https://lens.google.com", forHTTPHeaderField: "Origin")
         request.setValue("https://lens.google.com/", forHTTPHeaderField: "Referer")
 

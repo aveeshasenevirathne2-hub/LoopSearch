@@ -672,6 +672,25 @@ private final class SettingsContentView: NSView {
             to: mainStack
         )
 
+        let panelTabOptions = PanelDefaultTab.allCases.map {
+            LiquidGlassSegmentedControl.Option(title: $0.title, symbol: nil)
+        }
+        let panelTabSegment = LiquidGlassSegmentedControl(
+            options: panelTabOptions,
+            selectedIndex: PanelDefaultTab.allCases.firstIndex(of: settings.panelDefaultTab) ?? 0,
+            height: 28,
+            compact: true
+        ) { idx in
+            guard PanelDefaultTab.allCases.indices.contains(idx) else { return }
+            AppSettings.shared.panelDefaultTab = PanelDefaultTab.allCases[idx]
+        }
+        addRow(
+            title: "Panel Opens On",
+            subtitle: "Default tab when results appear (remembered when changed)",
+            control: panelTabSegment,
+            to: mainStack
+        )
+
         let blurToggle = LiquidGlassToggle(isOn: settings.blurOutsideSelectionBeforeSearch) { isOn in
             AppSettings.shared.blurOutsideSelectionBeforeSearch = isOn
         }

@@ -23,6 +23,20 @@ enum AfterSelectionAction: String, CaseIterable {
     }
 }
 
+enum PanelDefaultTab: String, CaseIterable {
+    case lens = "lens"
+    case answer = "answer"
+    case auto = "auto"
+
+    var title: String {
+        switch self {
+        case .lens: return "Lens"
+        case .answer: return "Answer"
+        case .auto: return "Auto"
+        }
+    }
+}
+
 enum SelectionMode: String, CaseIterable {
     case rectangle = "Rectangle (Box)"
     case circle = "Freehand Lasso"
@@ -400,23 +414,42 @@ enum AIService {
     static func generateExplanation(
         image: CGImage,
         ocrText: String,
+        ocrConfidence: Double = 1.0,
         mathSolution: (expression: String, result: String)?,
         classificationLabels: [String],
         detectedURL: URL?,
         userQuery: String?
     ) async -> String {
+        let cleanOCR = ocrText
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let hasStrongSignal = (cleanOCR.count >= 6 && ocrConfidence >= 0.45) || !classificationLabels.isEmpty || mathSolution != nil || detectedURL != nil
+
+        let apiKey = KeychainHelper.loadAPIKey()
+        if !hasStrongSignal && (userQuery?.isEmpty ?? true) {
+            return "Not sure what this is. Check Lens results."
+        }
+
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *) {
             if SystemLanguageModel.default.isAvailable {
                 do {
-                    let session = LanguageModelSession()
+                    let session = LanguageModelSession(
+                        instructions: """
+                        You summarize or explain a screen capture in 1-3 concise sentences.
+                        Rules: Strictly use ONLY the provided OCR text and image labels. NEVER invent names, brands, dates, or places not present in OCR text.
+                        If the text/labels are weak or uncertain, reply with exactly: Not sure what this is. Check Lens results.
+                        """
+                    )
                     let context = [
-                        ocrText.isEmpty ? nil : "OCR Text: \(ocrText)",
-                        classificationLabels.isEmpty ? nil : "Visual labels: \(classificationLabels.joined(separator: ", "))",
+                        cleanOCR.isEmpty ? nil : "OCR Text: \(cleanOCR)",
+                        classificationLabels.isEmpty ? nil : "Image Labels: \(classificationLabels.joined(separator: ", "))",
                         mathSolution.map { "Math: \($0.expression) = \($0.result)" }
                     ].compactMap { $0 }.joined(separator: "\n")
-                    let instruction = (userQuery?.isEmpty == false) ? userQuery! : "Summarize or explain this concisely in 1-3 sentences."
-                    let response = try await session.respond(to: "\(instruction)\n\(context)")
+                    let instruction = (userQuery?.isEmpty == false) ? userQuery! : "Explain what this is based on the OCR text and image labels."
+                    let options = GenerationOptions(temperature: 0.0)
+                    let response = try await session.respond(to: "\(instruction)\n\(context)", options: options)
                     let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !text.isEmpty { return text }
                 } catch {}
@@ -424,14 +457,13 @@ enum AIService {
         }
         #endif
 
-        let apiKey = KeychainHelper.loadAPIKey()
         if !apiKey.isEmpty {
-            if let remote = await callGeminiVision(image: image, userQuery: userQuery, ocrText: ocrText, apiKey: apiKey) {
+            if let remote = await callGeminiVision(image: image, userQuery: userQuery, ocrText: cleanOCR, classificationLabels: classificationLabels, apiKey: apiKey) {
                 return remote
             }
         }
 
-        // Instant On-Device facts only (math/URL/OCR/subject) — never echo userQuery prompt.
+        // Fallback when neither FoundationModels nor Gemini key is available: factual OCR/smart detections only.
         var parts: [String] = []
         if let math = mathSolution {
             parts.append("\(math.expression) = \(math.result)")
@@ -439,16 +471,12 @@ enum AIService {
         if let url = detectedURL {
             parts.append(url.host ?? url.absoluteString)
         }
-        let cleanOCR = ocrText
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-
-        if !cleanOCR.isEmpty {
+        if !cleanOCR.isEmpty && ocrConfidence >= 0.52 {
             let summary = cleanOCR.count > 160 ? String(cleanOCR.prefix(158)) + "…" : cleanOCR
             parts.append(summary)
-        } else if !classificationLabels.isEmpty {
-            parts.append(classificationLabels.prefix(3).map { $0.capitalized }.joined(separator: ", "))
+        }
+        if parts.isEmpty {
+            return "Not sure what this is. Check Lens results."
         }
         return parts.joined(separator: " · ")
     }
@@ -457,6 +485,7 @@ enum AIService {
         image: CGImage,
         userQuery: String?,
         ocrText: String,
+        classificationLabels: [String],
         apiKey: String
     ) async -> String? {
         let rep = NSBitmapImageRep(cgImage: image)
@@ -468,13 +497,16 @@ enum AIService {
             return nil
         }
 
+        let contextBlock = [
+            ocrText.isEmpty ? nil : "OCR: \(ocrText)",
+            classificationLabels.isEmpty ? nil : "Labels: \(classificationLabels.joined(separator: ", "))"
+        ].compactMap { $0 }.joined(separator: "\n")
+
         let prompt: String
         if let q = userQuery, !q.isEmpty {
-            prompt = "Answer concisely in 1 to 2 sentences about this screen selection: \(q)"
-        } else if !ocrText.isEmpty {
-            prompt = "Explain what this selected screen snippet means or does in 1 to 2 concise sentences."
+            prompt = "Answer concisely in 1 to 3 sentences at temperature 0. Never invent names, dates, or places not supported by the image or OCR. If unsure, say: Not sure what this is. Check Lens results.\nQuestion: \(q)\n\(contextBlock)"
         } else {
-            prompt = "Identify and explain what is shown in this screen selection in 1 to 2 concise sentences."
+            prompt = "Explain this selection concisely in 1 to 3 sentences. Never invent names, dates, or places not clearly supported by the image or OCR. If unsure, say: Not sure what this is. Check Lens results.\n\(contextBlock)"
         }
 
         let payload: [String: Any] = [
@@ -492,8 +524,8 @@ enum AIService {
                 ]
             ],
             "generationConfig": [
-                "maxOutputTokens": 140,
-                "temperature": 0.2
+                "maxOutputTokens": 160,
+                "temperature": 0.0
             ]
         ]
 
@@ -531,6 +563,8 @@ final class AppSettings {
         static let selectionMode = "selection_mode"
         static let searchEngine = "search_engine"
         static let afterSelectionAction = "after_selection_action"
+        static let panelDefaultTab = "panel_default_tab"
+        static let panelTabWasCustomized = "panel_tab_was_customized"
         static let blurOutsideSelectionBeforeSearch = "blur_outside_selection_before_search"
         static let historyRetentionDays = "history_retention_days"
         static let enableEncryptedSync = "enable_encrypted_sync"
@@ -578,6 +612,20 @@ final class AppSettings {
         didSet {
             defaults.set(afterSelectionAction.rawValue, forKey: Keys.afterSelectionAction)
             notifyChanged()
+        }
+    }
+
+    var panelDefaultTab: PanelDefaultTab {
+        didSet {
+            defaults.set(panelDefaultTab.rawValue, forKey: Keys.panelDefaultTab)
+            panelTabWasCustomized = true
+            notifyChanged()
+        }
+    }
+
+    var panelTabWasCustomized: Bool {
+        didSet {
+            defaults.set(panelTabWasCustomized, forKey: Keys.panelTabWasCustomized)
         }
     }
 
@@ -838,6 +886,15 @@ final class AppSettings {
             self.afterSelectionAction = action
         } else {
             self.afterSelectionAction = .showPanel
+        }
+        let wasCustomized = defaults.bool(forKey: Keys.panelTabWasCustomized)
+        self.panelTabWasCustomized = wasCustomized
+        if wasCustomized,
+           let rawTab = defaults.string(forKey: Keys.panelDefaultTab),
+           let tab = PanelDefaultTab(rawValue: rawTab) {
+            self.panelDefaultTab = tab
+        } else {
+            self.panelDefaultTab = .lens
         }
         self.blurOutsideSelectionBeforeSearch = defaults.object(forKey: Keys.blurOutsideSelectionBeforeSearch) != nil
             ? defaults.bool(forKey: Keys.blurOutsideSelectionBeforeSearch)

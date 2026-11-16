@@ -29,6 +29,8 @@ struct VisionAnalysisResult: Sendable {
     let isLowInformation: Bool
     let classificationLabels: [String]
     let mathSolution: (expression: String, result: String)?
+    let averageConfidence: Double
+    let isMostlyText: Bool
 
     var isEmpty: Bool {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && barcodes.isEmpty
@@ -56,6 +58,8 @@ enum VisionAnalyzer {
                 let textRequest = VNRecognizeTextRequest()
                 textRequest.recognitionLevel = .accurate
                 textRequest.usesLanguageCorrection = true
+                textRequest.automaticallyDetectsLanguage = true
+                textRequest.recognitionLanguages = ["en-US", "zh-Hans", "zh-Hant"]
 
                 let barcodeRequest = VNDetectBarcodesRequest()
                 let classifyRequest = VNClassifyImageRequest()
@@ -67,10 +71,12 @@ enum VisionAnalyzer {
                 try? imageHandler.perform([barcodeRequest, classifyRequest])
 
                 var rawBlocks: [RecognizedTextBlock] = []
+                var confidences: [Float] = []
                 for obs in textRequest.results ?? [] {
                     guard let top = obs.topCandidates(1).first, top.confidence >= 0.35 else { continue }
                     let str = top.string.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !str.isEmpty else { continue }
+                    confidences.append(top.confidence)
                     let box = obs.boundingBox
                     let topLeftRect = CGRect(
                         x: box.origin.x,
@@ -90,8 +96,13 @@ enum VisionAnalyzer {
                 }
                 let lines = blocks.map(\.text)
 
+                let avgConf = confidences.isEmpty ? 0.0 : Double(confidences.reduce(0, +)) / Double(confidences.count)
                 let fullText = lines.joined(separator: "\n")
-                let cleanPreview = makeCleanPreviewSnippet(from: lines)
+                let rawCleanPreview = makeCleanPreviewSnippet(from: lines)
+                let cleanPreview = (avgConf < 0.52 || hasGarbledReplacementJunk(rawCleanPreview)) ? "" : rawCleanPreview
+
+                let totalTextArea = blocks.reduce(0.0) { $0 + Double($1.normalizedTopLeftRect.width * $1.normalizedTopLeftRect.height) }
+                let isMostlyText = (lines.count >= 3 && fullText.count >= 40) || totalTextArea >= 0.16
 
                 let barcodes = (barcodeRequest.results ?? [])
                     .compactMap { $0.payloadStringValue }
@@ -130,7 +141,10 @@ enum VisionAnalyzer {
                         if match.resultType == .phoneNumber, let p = match.phoneNumber, !phones.contains(p) {
                             phones.append(p)
                         } else if match.resultType == .date, let d = match.date {
-                            dates.append(d)
+                            let matchedSub = nsText.substring(with: match.range)
+                            if isRealCalendarDateMatch(matchedSub) {
+                                dates.append(d)
+                            }
                         }
                     }
                 }
@@ -161,7 +175,9 @@ enum VisionAnalyzer {
                     hasVibrantColorSwatch: colorInfo.isVibrantSwatch && !isLowInfo && fullText.count < 4,
                     isLowInformation: isLowInfo,
                     classificationLabels: labels,
-                    mathSolution: math
+                    mathSolution: math,
+                    averageConfidence: avgConf,
+                    isMostlyText: isMostlyText
                 ))
             }
         }
@@ -198,6 +214,36 @@ enum VisionAnalyzer {
         guard let dominant = recognizer.dominantLanguage else { return true }
         let systemLang = Locale.current.language.languageCode?.identifier ?? "en"
         return dominant.rawValue.lowercased().hasPrefix(systemLang.lowercased())
+    }
+
+    private static func hasGarbledReplacementJunk(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if trimmed.contains("\u{FFFD}") || trimmed.contains("###") {
+            return true
+        }
+        let nonSpace = trimmed.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }
+        guard nonSpace.count >= 6 else { return false }
+        let symbols = nonSpace.filter { CharacterSet.punctuationCharacters.contains($0) || CharacterSet.symbols.contains($0) }
+        return Double(symbols.count) / Double(nonSpace.count) > 0.42
+    }
+
+    /// Accepts real calendar dates (month/day, slash/dash dates, or weekday/relative day words) and rejects bare times / mm:ss durations.
+    private static func isRealCalendarDateMatch(_ substring: String) -> Bool {
+        let lower = substring.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lower.isEmpty else { return false }
+        // Reject bare HH:MM or MM:SS patterns without date words
+        if lower.range(of: #"^\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:am|pm))?$"#, options: .regularExpression) != nil {
+            return false
+        }
+        let monthOrWeekday = #"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|today|tomorrow|yesterday)\b"#
+        if lower.range(of: monthOrWeekday, options: .regularExpression) != nil {
+            return true
+        }
+        if lower.range(of: #"\b\d{1,4}[/-]\d{1,2}(?:[/-]\d{1,4})?\b"#, options: .regularExpression) != nil {
+            return true
+        }
+        return false
     }
 
     private static func extractTableIfPresent(from blocks: [RecognizedTextBlock]) -> (tsv: String?, csv: String?) {

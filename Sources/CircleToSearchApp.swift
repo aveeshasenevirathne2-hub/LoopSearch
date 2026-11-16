@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hotkeyManager: HotkeyManager!
     private let overlayController = OverlayWindowController()
     private let toastController = ToastWindowController()
+    private let menuBarArrowController = MenuBarArrowCalloutController()
     private var isOverlayOpen = false
     private var lastObservedSignedInState = FirebaseAuthService.shared.isSignedIn
     nonisolated(unsafe) private var settingsObserver: NSObjectProtocol?
@@ -158,6 +159,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             OnboardingWindowController.shared.show { [weak self] in
                 self?.triggerCircleToSearch()
             }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
+                self?.showMenuBarArrowPointer(message: "LoopSearch lives here in your Menu Bar")
+            }
         } else {
             toastController.show(
                 message: "LoopSearch ready — press \(AppSettings.shared.activeHotkeyDisplayString)",
@@ -179,10 +183,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let place = AppSettings.shared.hideDockIcon ? "top-right Menu Bar" : "Dock & Menu Bar"
-                self.toastController.show(
-                    message: "LoopSearch stays running in your \(place) — press \(AppSettings.shared.activeHotkeyDisplayString)",
-                    duration: 3.4
+                let place = AppSettings.shared.hideDockIcon ? "Menu Bar" : "Dock & Menu Bar"
+                self.showMenuBarArrowPointer(
+                    message: "Welcome to LoopSearch! Always ready in your \(place) — press \(AppSettings.shared.activeHotkeyDisplayString)"
                 )
             }
         }
@@ -235,6 +238,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let updateObserver {
             NotificationCenter.default.removeObserver(updateObserver)
         }
+    }
+
+    private func showMenuBarArrowPointer(message: String) {
+        let itemFrame = statusItem.button?.window?.frame
+        menuBarArrowController.show(pointingAt: itemFrame, message: message)
     }
 
     private func setupStatusItem() {
@@ -874,6 +882,132 @@ private final class ToastWindowController {
             }
             guard !Task.isCancelled, self.window === win else { return }
             win.orderOut(nil)
+            self.window = nil
+        }
+    }
+}
+
+/// Animated curved-arrow callout pointing directly at LoopSearch's Menu Bar status icon on first launch & setup completion.
+@MainActor
+private final class MenuBarArrowCalloutController {
+    private var window: NSPanel?
+    private var dismissTask: Task<Void, Never>?
+
+    func show(pointingAt statusItemRect: NSRect?, message: String) {
+        dismissTask?.cancel()
+        window?.orderOut(nil)
+
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        let width: CGFloat = 310
+        let height: CGFloat = 118
+        let targetX: CGFloat
+        let targetY: CGFloat
+        if let rect = statusItemRect {
+            targetX = max(screen.frame.minX + 16, min(screen.frame.maxX - width - 14, rect.maxX - width + 32))
+            targetY = rect.minY - height - 4
+        } else {
+            targetX = screen.visibleFrame.maxX - width - 22
+            targetY = screen.visibleFrame.maxY - height - 6
+        }
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: targetX, y: targetY, width: width, height: height),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.level = .statusBar
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = false
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        root.wantsLayer = true
+
+        // Curved animated cyan/blue arrow pointing up-right toward the Menu Bar icon
+        let arrowHost = NSView(frame: NSRect(x: width - 86, y: height - 56, width: 64, height: 54))
+        arrowHost.wantsLayer = true
+        let arrowLayer = CAShapeLayer()
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 10, y: 6))
+        path.addQuadCurve(to: CGPoint(x: 44, y: 48), control: CGPoint(x: 8, y: 42))
+        // Arrowhead
+        path.move(to: CGPoint(x: 34, y: 40))
+        path.addLine(to: CGPoint(x: 44, y: 48))
+        path.addLine(to: CGPoint(x: 49, y: 35))
+        arrowLayer.path = path
+        arrowLayer.strokeColor = NSColor(red: 0.08, green: 0.64, blue: 1.0, alpha: 0.98).cgColor
+        arrowLayer.fillColor = NSColor.clear.cgColor
+        arrowLayer.lineWidth = 4.2
+        arrowLayer.lineCap = .round
+        arrowLayer.lineJoin = .round
+        arrowLayer.shadowColor = NSColor(red: 0.22, green: 0.74, blue: 0.97, alpha: 0.8).cgColor
+        arrowLayer.shadowRadius = 8
+        arrowLayer.shadowOpacity = 0.7
+        arrowLayer.shadowOffset = .zero
+        arrowHost.layer?.addSublayer(arrowLayer)
+
+        let drawAnim = CABasicAnimation(keyPath: "strokeEnd")
+        drawAnim.fromValue = 0.0
+        drawAnim.toValue = 1.0
+        drawAnim.duration = 0.55
+        drawAnim.timingFunction = AppleMotion.easeOut
+        arrowLayer.add(drawAnim, forKey: "arrowDraw")
+
+        let pulseAnim = CABasicAnimation(keyPath: "transform.translation.y")
+        pulseAnim.fromValue = 0
+        pulseAnim.toValue = 4
+        pulseAnim.duration = 0.9
+        pulseAnim.autoreverses = true
+        pulseAnim.repeatCount = .infinity
+        pulseAnim.timingFunction = AppleMotion.easeInOut
+        arrowHost.layer?.add(pulseAnim, forKey: "arrowFloat")
+
+        let card = LiquidGlassSurfaceView(cornerRadius: 16, style: .regular, tintColor: NSColor.systemBlue.withAlphaComponent(0.18))
+        card.frame = NSRect(x: 0, y: 0, width: width - 16, height: 64)
+        let logo = LoopBrandLogoView(size: 24)
+        logo.translatesAutoresizingMaskIntoConstraints = false
+        let label = NSTextField(wrappingLabelWithString: message)
+        label.font = .systemFont(ofSize: 12.0, weight: .semibold)
+        label.textColor = .labelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        card.contentContainer.addSubview(logo)
+        card.contentContainer.addSubview(label)
+        NSLayoutConstraint.activate([
+            logo.leadingAnchor.constraint(equalTo: card.contentContainer.leadingAnchor, constant: 12),
+            logo.centerYAnchor.constraint(equalTo: card.contentContainer.centerYAnchor),
+            logo.widthAnchor.constraint(equalToConstant: 24),
+            logo.heightAnchor.constraint(equalToConstant: 24),
+            label.leadingAnchor.constraint(equalTo: logo.trailingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: card.contentContainer.trailingAnchor, constant: -12),
+            label.centerYAnchor.constraint(equalTo: card.contentContainer.centerYAnchor)
+        ])
+
+        root.addSubview(card)
+        root.addSubview(arrowHost)
+        panel.contentView = root
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        window = panel
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = AppleMotion.duration(0.28)
+            ctx.timingFunction = AppleMotion.easeOut
+            panel.animator().alphaValue = 1.0
+        }
+
+        dismissTask = Task {
+            try? await Task.sleep(nanoseconds: 6_500_000_000)
+            guard !Task.isCancelled, self.window === panel else { return }
+            await NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = AppleMotion.duration(0.24)
+                ctx.timingFunction = AppleMotion.easeIn
+                panel.animator().alphaValue = 0.0
+            }
+            guard !Task.isCancelled, self.window === panel else { return }
+            panel.orderOut(nil)
             self.window = nil
         }
     }

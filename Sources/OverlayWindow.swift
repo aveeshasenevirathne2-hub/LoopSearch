@@ -2442,9 +2442,19 @@ private final class OverlayCanvasView: NSView {
                 return
             }
 
-            // Privacy-first: only upload to Google Lens automatically if user chose "After selection: Search"
-            // Otherwise stay on-device in Answer tab until user switches to Lens or clicks Search.
-            guard shouldAutoSearch else {
+            // Switch panel tab for Auto mode before uploading
+            if let sheet = self?.resultsSheet {
+                let targetIdx: Int
+                switch AppSettings.shared.panelDefaultTab {
+                case .answer: targetIdx = 0
+                case .lens: targetIdx = 1
+                case .auto: targetIdx = analysis.isMostlyText ? 0 : 1
+                }
+                sheet.applyInitialTab(targetIdx)
+            }
+
+            let needsLensNow = shouldAutoSearch || AppSettings.shared.panelDefaultTab == .lens || (AppSettings.shared.panelDefaultTab == .auto && !analysis.isMostlyText)
+            guard needsLensNow else {
                 self?.stopBracketPulse()
                 return
             }
@@ -2453,6 +2463,7 @@ private final class OverlayCanvasView: NSView {
             do {
                 let upload = try await GoogleLensService.uploadImage(cropped, existingCookies: existingCookies)
                 guard !Task.isCancelled else { return }
+                self?.resultsSheet?.markLensUploadStarted()
                 self?.resultsSheet?.loadLensResults(upload)
             } catch {
                 guard !Task.isCancelled else { return }
@@ -3250,10 +3261,14 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     private var dragEngine = DragInertiaEngine()
     private var headerTrackingArea: NSTrackingArea?
 
-    private var engineButton: LiquidGlassButton!
+    private var engineButton: LiquidGlassButton?
     private var resultsModeSegmented: LiquidGlassSegmentedControl!
     private var backButton: LiquidGlassButton!
     private var hasTriggeredLensUpload = false
+    private var currentOcrConfidence: Double = 1.0
+    private var aiSourceBadgeLabel: NSTextField!
+    private var answerContextCard: LiquidGlassSurfaceView!
+    private var answerContextLabel: NSTextField!
     private var currentTableTSV: String?
     private var currentTableCSV: String?
     private var currentDetectedEmails: [String] = []
@@ -3991,34 +4006,19 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         ])
 
         // 1. Clean Top Bar: Engine + Back on Left, True-Centered Grab Pill, Unified 26pt Controls on Right
-        let currentEngine = AppSettings.shared.searchEngine
-        engineButton = LiquidGlassButton(
-            symbol: currentEngine.symbolName,
-            symbolPointSize: 10.5,
-            symbolWeight: .semibold,
-            title: currentEngine.shortTitle,
-            tooltip: "Switch Search Engine (\(currentEngine.title))",
-            height: 26,
-            style: .regular,
-            foregroundColor: .labelColor,
-            font: .systemFont(ofSize: 11, weight: .semibold)
-        ) { [weak self] in
-            self?.cycleSearchEngine()
-        }
-        engineButton.setAccessibilityLabel("Switch Search Engine")
-
         backButton = makeGlassCircleButton(symbol: "chevron.left", pointSize: 10.5, weight: .semibold, tooltip: "Back") { [weak self] in
             self?.handleBack()
         }
         backButton.isHidden = true
         backButton.setAccessibilityLabel("Back")
 
+        let initialTabIndex: Int = (AppSettings.shared.panelDefaultTab == .answer) ? 0 : 1
         resultsModeSegmented = LiquidGlassSegmentedControl(
             options: [
                 .init(title: "Answer", symbol: "sparkles"),
                 .init(title: "Lens", symbol: "globe")
             ],
-            selectedIndex: AppSettings.shared.afterSelectionAction == .search ? 1 : 0,
+            selectedIndex: initialTabIndex,
             height: 24,
             compact: true
         ) { [weak self] idx in
@@ -4028,7 +4028,6 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         let leftTopGroup = LiquidGlassGroupView(spacing: 5)
         leftTopGroup.stackView.addArrangedSubview(backButton)
         leftTopGroup.stackView.addArrangedSubview(resultsModeSegmented)
-        leftTopGroup.stackView.addArrangedSubview(engineButton)
 
         let pinBtn = makeGlassCircleButton(symbol: "pin.fill", pointSize: 10.0, weight: .medium, tooltip: "Pin to Screen (⌘P)") { [weak self] in
             self?.onPinImage()
@@ -4399,11 +4398,31 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         aiCopyButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         aiCopyButton.widthAnchor.constraint(equalToConstant: 60).isActive = true
 
+        let hasKeyConfigured = !KeychainHelper.loadAPIKey().isEmpty
+        aiSourceBadgeLabel = NSTextField(labelWithString: hasKeyConfigured ? "Gemini answer · may be wrong" : "On-device answer · may be wrong")
+        aiSourceBadgeLabel.font = .systemFont(ofSize: 10.0, weight: .semibold)
+        aiSourceBadgeLabel.textColor = .secondaryLabelColor
+
         let aiStack = NSStackView(views: [aiIcon, aiAnswerLabel, aiCopyButton])
         aiStack.orientation = .horizontal
         aiStack.alignment = .centerY
         aiStack.distribution = .fill
         aiStack.spacing = 8
+
+        let suggest1 = makeGlassChip(title: "Summarize", symbol: "text.alignleft") { [weak self] in
+            self?.startAIExplanationStream(prompt: "Summarize this concisely in 2 sentences.", forceShow: true)
+        }
+        let suggest2 = makeGlassChip(title: "Key points", symbol: "list.bullet") { [weak self] in
+            self?.startAIExplanationStream(prompt: "List the key factual points shown here.", forceShow: true)
+        }
+        let suggest3 = makeGlassChip(title: "Open Lens", symbol: "globe") { [weak self] in
+            self?.resultsModeSegmented?.setSelectedIndex(1, animated: true)
+            self?.handleResultsModeChanged(1)
+        }
+        let suggestedRow = NSStackView(views: [suggest1, suggest2, suggest3])
+        suggestedRow.orientation = .horizontal
+        suggestedRow.alignment = .centerY
+        suggestedRow.spacing = 6
 
         followUpField = NSTextField()
         followUpField.isBezeled = false
@@ -4433,7 +4452,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             followUpField.centerYAnchor.constraint(equalTo: followUpContainer.centerYAnchor)
         ])
 
-        let aiCardBodyStack = NSStackView(views: [aiStack, followUpContainer])
+        let aiCardBodyStack = NSStackView(views: [aiSourceBadgeLabel, aiStack, suggestedRow, followUpContainer])
         aiCardBodyStack.orientation = .vertical
         aiCardBodyStack.alignment = .leading
         aiCardBodyStack.spacing = 6
@@ -4450,6 +4469,28 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         rootStack.addArrangedSubview(aiAnswerCard)
         aiAnswerCard.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
         aiAnswerCard.setContentCompressionResistancePriority(.required, for: .vertical)
+
+        answerContextCard = LiquidGlassSurfaceView(
+            cornerRadius: 14,
+            style: .regular,
+            tintColor: NSColor.labelColor.withAlphaComponent(0.04)
+        )
+        answerContextCard.translatesAutoresizingMaskIntoConstraints = false
+        answerContextCard.isHidden = true
+        answerContextLabel = NSTextField(wrappingLabelWithString: "")
+        answerContextLabel.font = .systemFont(ofSize: 12.0, weight: .regular)
+        answerContextLabel.textColor = .secondaryLabelColor
+        answerContextLabel.isSelectable = true
+        answerContextLabel.translatesAutoresizingMaskIntoConstraints = false
+        answerContextCard.contentContainer.addSubview(answerContextLabel)
+        NSLayoutConstraint.activate([
+            answerContextLabel.leadingAnchor.constraint(equalTo: answerContextCard.contentContainer.leadingAnchor, constant: 12),
+            answerContextLabel.trailingAnchor.constraint(equalTo: answerContextCard.contentContainer.trailingAnchor, constant: -12),
+            answerContextLabel.topAnchor.constraint(equalTo: answerContextCard.contentContainer.topAnchor, constant: 10),
+            answerContextLabel.bottomAnchor.constraint(lessThanOrEqualTo: answerContextCard.contentContainer.bottomAnchor, constant: -10)
+        ])
+        rootStack.addArrangedSubview(answerContextCard)
+        answerContextCard.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
 
         // 5. Empty / Boring Selection Card ("Not much here. Try selecting something with text or an object.")
         emptySelectionCard = LiquidGlassSurfaceView(
@@ -4588,7 +4629,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         config.websiteDataStore = .default()
         // Never inject custom CSS into Google's page; rely purely on WKWebView.appearance.
         webView = WKWebView(frame: .zero, configuration: config)
-        webView.customUserAgent = GoogleLensService.mobileUserAgent
+        webView.customUserAgent = GoogleLensService.desktopSafariUserAgent
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.wantsLayer = true
@@ -4911,6 +4952,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             return
         }
 
+        currentOcrConfidence = result.averageConfidence
         currentDetectedEmails = result.emails
         currentDetectedPhones = result.phoneNumbers
         currentDetectedDates = result.dates
@@ -4918,7 +4960,16 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         currentTableCSV = result.tableCSV
 
         emptySelectionCard.isHidden = true
-        webOuterCard.isHidden = (resultsModeSegmented?.selectedIndex == 0 && !hasTriggeredLensUpload)
+        let isLensSelected = (resultsModeSegmented?.selectedIndex ?? 1) == 1
+        webOuterCard.isHidden = !isLensSelected
+        answerContextCard?.isHidden = isLensSelected
+        let contextParts = [
+            result.cleanPreviewText.isEmpty ? nil : "Recognized Text:\n\(result.text)",
+            result.classificationLabels.isEmpty ? nil : "Detected Visual Subjects: \(result.classificationLabels.joined(separator: ", "))"
+        ].compactMap { $0 }
+        answerContextLabel?.stringValue = contextParts.isEmpty
+            ? "Switch to the Lens tab above for Google visual & web matches."
+            : contextParts.joined(separator: "\n\n")
         let hasRecognizedText = !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         translateActionBtn.isHidden = !hasRecognizedText || result.isSystemLanguage
         addContactChip.isHidden = result.emails.isEmpty && result.phoneNumbers.isEmpty
@@ -5013,6 +5064,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             let answer = await AIService.generateExplanation(
                 image: img,
                 ocrText: ocr,
+                ocrConfidence: self.currentOcrConfidence,
                 mathSolution: self.currentMathSolution,
                 classificationLabels: labels,
                 detectedURL: self.currentURL,
@@ -5144,6 +5196,22 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         }
 
         fadeOutLoadingOverlay()
+        // Smoothly scroll desktop Google Lens results into view without clicking or injecting CSS/JS hiding rules
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self else { return }
+            let scrollOnlyJs = """
+            (function() {
+                var target = document.querySelector('#search, #rcnt, [role="main"]');
+                if (target) {
+                    var rect = target.getBoundingClientRect();
+                    if (rect.top > 90) {
+                        window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - 16), behavior: 'smooth' });
+                    }
+                }
+            })();
+            """
+            self.webView?.evaluateJavaScript(scrollOnlyJs, completionHandler: nil)
+        }
     }
 
     func webView(
@@ -5308,9 +5376,9 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
     private func switchToSearchEngine(_ next: SearchEngine) {
         AppSettings.shared.searchEngine = next
-        engineButton.title = next.shortTitle
-        engineButton.toolTip = "Switch Search Engine (\(next.title))"
-        engineButton.updateSymbol(next.symbolName, pointSize: 10.5, weight: .semibold)
+        engineButton?.title = next.shortTitle
+        engineButton?.toolTip = "Switch Search Engine (\(next.title))"
+        engineButton?.updateSymbol(next.symbolName, pointSize: 10.5, weight: .semibold)
         errorStateCard.isHidden = true
         leaveLowInfoStateIfNeeded()
 
@@ -5432,9 +5500,23 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         }
     }
 
+    func markLensUploadStarted() {
+        hasTriggeredLensUpload = true
+    }
+
+    func applyInitialTab(_ idx: Int) {
+        resultsModeSegmented?.setSelectedIndex(idx, animated: false)
+        handleResultsModeChanged(idx)
+    }
+
     private func handleResultsModeChanged(_ idx: Int) {
         let isLensTab = (idx == 1)
         webOuterCard.isHidden = !isLensTab
+        answerContextCard?.isHidden = isLensTab
+        aiAnswerCard.isHidden = isLensTab && currentAIExplanation.isEmpty && KeychainHelper.loadAPIKey().isEmpty && currentMathSolution == nil
+        if !isLensTab && aiAnswerCard.isHidden {
+            startAIExplanationStream(prompt: "Explain this selection concisely in 1 to 3 sentences.", forceShow: true)
+        }
         if isLensTab && !hasTriggeredLensUpload {
             triggerLazyLensUpload()
         }
