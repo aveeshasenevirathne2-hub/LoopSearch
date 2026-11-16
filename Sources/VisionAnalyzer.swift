@@ -157,6 +157,7 @@ enum VisionAnalyzer {
     }
 
     /// Removes clipped single-character edge artifacts (e.g. "e HotkeyPreset...") and formats a clean 2-line preview.
+    /// Suppresses multi-item UI sidebars/menus into a concise summary instead of concatenating junk labels.
     private static func makeCleanPreviewSnippet(from lines: [String]) -> String {
         let cleanedLines: [String] = lines.compactMap { line in
             var s = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -174,6 +175,17 @@ enum VisionAnalyzer {
                 }
             }
             return s
+        }
+        if cleanedLines.count >= 6 {
+            let totalWords = cleanedLines.reduce(0) { $0 + $1.split(separator: " ").count }
+            let avgWords = Double(totalWords) / Double(cleanedLines.count)
+            let sentenceCount = cleanedLines.filter { line in
+                guard let last = line.last else { return false }
+                return last == "." || last == "?" || last == "!"
+            }.count
+            if avgWords <= 3.2 && sentenceCount < 2 {
+                return "Sidebar / menu (\(cleanedLines.count) items)"
+            }
         }
         return cleanedLines.joined(separator: "  ")
     }
@@ -219,6 +231,7 @@ enum VisionAnalyzer {
         lumValues.reserveCapacity(w * h)
         var edgeAccum: Double = 0
         var edgePairs: Double = 0
+        var colorBuckets: [Int: (count: Int, r: CGFloat, g: CGFloat, b: CGFloat, satSum: CGFloat)] = [:]
 
         for y in 2..<(h - 2) {
             for x in 2..<(w - 2) {
@@ -251,6 +264,13 @@ enum VisionAnalyzer {
                 let maxC = max(r, g, b)
                 let minC = min(r, g, b)
                 let sat = maxC > 0.05 ? (maxC - minC) / maxC : 0
+                let rq = min(15, Int(r * 16))
+                let gq = min(15, Int(g * 16))
+                let bq = min(15, Int(b * 16))
+                let bucketKey = (rq << 8) | (gq << 4) | bq
+                let existing = colorBuckets[bucketKey] ?? (0, 0, 0, 0, 0)
+                colorBuckets[bucketKey] = (existing.count + 1, existing.r + r, existing.g + g, existing.b + b, existing.satSum + sat)
+
                 let cx = 1.0 - abs(CGFloat(x) / CGFloat(w) - 0.5)
                 let cy = 1.0 - abs(CGFloat(y) / CGFloat(h) - 0.5)
                 let weight = (sat * 2.2 + 0.25) * (lum > 0.08 && lum < 0.94 ? 1.0 : 0.3) * cx * cy
@@ -269,17 +289,21 @@ enum VisionAnalyzer {
         let stdDev = sqrt(variance)
         let meanEdge = edgePairs > 0 ? edgeAccum / edgePairs : 0
 
-        let finalR = bestWeight > 0.35 ? bestR : (avgR / max(1, count))
-        let finalG = bestWeight > 0.35 ? bestG : (avgG / max(1, count))
-        let finalB = bestWeight > 0.35 ? bestB : (avgB / max(1, count))
+        let topBucket = colorBuckets.values.max(by: { $0.count < $1.count })
+        let topRatio = (count > 0 && topBucket != nil) ? Double(topBucket!.count) / Double(count) : 0
+        let topAvgSat = topBucket != nil ? Double(topBucket!.satSum) / Double(max(1, topBucket!.count)) : 0
+
+        let finalR = topBucket != nil && topRatio >= 0.35 ? (topBucket!.r / CGFloat(topBucket!.count)) : (bestWeight > 0.35 ? bestR : (avgR / max(1, count)))
+        let finalG = topBucket != nil && topRatio >= 0.35 ? (topBucket!.g / CGFloat(topBucket!.count)) : (bestWeight > 0.35 ? bestG : (avgG / max(1, count)))
+        let finalB = topBucket != nil && topRatio >= 0.35 ? (topBucket!.b / CGFloat(topBucket!.count)) : (bestWeight > 0.35 ? bestB : (avgB / max(1, count)))
 
         let ri = max(0, min(255, Int((finalR * 255).rounded())))
         let gi = max(0, min(255, Int((finalG * 255).rounded())))
         let bi = max(0, min(255, Int((finalB * 255).rounded())))
         let hex = String(format: "#%02X%02X%02X", ri, gi, bi)
-        // Only show color chip if saturation is meaningful (> 0.22), avoiding dull #212121 gray chips
-        let isVibrant = bestSat > 0.22
-        return (hex, (finalR, finalG, finalB), isVibrant, stdDev, meanEdge)
+        // Show color chip ONLY when a single color genuinely dominates the selection (not noisy text/landscapes)
+        let isDominantColor = (topRatio >= 0.52 && topAvgSat > 0.24) || (topRatio >= 0.72 && stdDev < 0.20)
+        return (hex, (finalR, finalG, finalB), isDominantColor, stdDev, meanEdge)
     }
 
     /// Detects and evaluates arithmetic/math expressions inside recognized text.

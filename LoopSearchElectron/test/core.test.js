@@ -36,6 +36,7 @@ const {
   displayHostForUrl,
   evaluateMathExpression,
   extractDominantColor,
+  formatOcrPreview,
   analyzeRegionDetail,
   shouldApplyWebDarkCss,
   buildSearchUrl
@@ -171,6 +172,20 @@ test('Vision helpers extract URLs, solve math cleanly, find color & low-info sur
   assert.equal(extractDominantColor(solid, 8, 8).hex, '#38BDF8');
   assert.equal(analyzeRegionDetail(solid, 8, 8).isLowInfo, true);
 
+  // Mixed photo/text without one dominant color must NOT emit a color chip
+  const mixed = new Uint8ClampedArray(8 * 8 * 4);
+  for (let i = 0; i < 64; i++) {
+    mixed[i * 4] = (i * 37) % 255;
+    mixed[i * 4 + 1] = (i * 73) % 255;
+    mixed[i * 4 + 2] = (i * 109) % 255;
+    mixed[i * 4 + 3] = 255;
+  }
+  assert.equal(extractDominantColor(mixed, 8, 8), null);
+
+  // Sidebar/menu fragments summarize cleanly instead of dumping junk text
+  const sidebarLines = ['New Search', 'Projects', 'Artifacts', 'Code', 'Customize', 'Upgrade', 'Chats'];
+  assert.equal(formatOcrPreview(sidebarLines.join('\n'), sidebarLines), 'Sidebar / menu (7 items)');
+
   assert.equal(shouldApplyWebDarkCss('https://lens.google.com/search?p=123'), true);
   assert.equal(shouldApplyWebDarkCss('https://www.google.com/sorry/index?continue=https://...'), false);
   assert.equal(shouldApplyWebDarkCss('https://accounts.google.com/v3/signin'), false);
@@ -187,9 +202,8 @@ test('Lens & GitHub helper functions', () => {
 
   const script = buildLensDarkThemeInjectionScript(true);
   assert.ok(script.includes("u.includes('/sorry')"));
-  assert.ok(script.includes('background-color: transparent !important'));
   assert.ok(script.includes('__loopsearch_clean_css'));
-  assert.ok(script.includes('a:not([role='));
+  assert.equal(script.includes('#7cc4ff'), false);
   assert.equal(compareSemver('1.0.4', '1.0.3'), 1);
   assert.equal(compareSemver('1.0.3', '1.0.3'), 0);
 

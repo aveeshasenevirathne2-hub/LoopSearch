@@ -111,8 +111,15 @@ function broadcastAll(channel, payload) {
 }
 
 function resolveEffectiveTheme(settings) {
-  if (settings.theme === 'light') return 'light';
-  if (settings.theme === 'dark') return 'dark';
+  if (settings.theme === 'light') {
+    nativeTheme.themeSource = 'light';
+    return 'light';
+  }
+  if (settings.theme === 'dark') {
+    nativeTheme.themeSource = 'dark';
+    return 'dark';
+  }
+  nativeTheme.themeSource = 'system';
   return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
 }
 

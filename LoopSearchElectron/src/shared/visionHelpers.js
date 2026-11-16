@@ -187,10 +187,12 @@
     const vividBuckets = new Map();
     const allBuckets = new Map();
 
+    let sampledCount = 0;
     for (let p = 0; p < totalPixels; p += step) {
       const idx = p * 4;
       const a = rgba[idx + 3];
       if (a < 128) continue;
+      sampledCount++;
       const r = rgba[idx];
       const g = rgba[idx + 1];
       const b = rgba[idx + 2];
@@ -205,30 +207,37 @@
       const qB = b >> 4;
       const key = (qR << 8) | (qG << 4) | qB;
 
-      const allEntry = allBuckets.get(key) || { count: 0, r: 0, g: 0, b: 0 };
+      const allEntry = allBuckets.get(key) || { count: 0, r: 0, g: 0, b: 0, satSum: 0 };
       allEntry.count++;
       allEntry.r += r;
       allEntry.g += g;
       allEntry.b += b;
+      allEntry.satSum += sat;
       allBuckets.set(key, allEntry);
 
       if (sat > 0.22 && lum > 0.12 && lum < 0.90) {
-        const vEntry = vividBuckets.get(key) || { count: 0, r: 0, g: 0, b: 0 };
+        const vEntry = vividBuckets.get(key) || { count: 0, r: 0, g: 0, b: 0, satSum: 0 };
         vEntry.count++;
         vEntry.r += r;
         vEntry.g += g;
         vEntry.b += b;
+        vEntry.satSum += sat;
         vividBuckets.set(key, vEntry);
       }
     }
 
-    const pool = vividBuckets.size > 0 ? vividBuckets : allBuckets;
-    if (pool.size === 0) return null;
+    if (sampledCount === 0 || allBuckets.size === 0) return null;
 
     let best = null;
-    for (const entry of pool.values()) {
+    for (const entry of allBuckets.values()) {
       if (!best || entry.count > best.count) best = entry;
     }
+    const topRatio = best.count / sampledCount;
+    const topAvgSat = best.satSum / best.count;
+    // Only show a color chip when one single color genuinely dominates (swatch/logo), never on text or busy photos
+    const isDominant = (topRatio >= 0.52 && topAvgSat > 0.24) || topRatio >= 0.72;
+    if (!isDominant) return null;
+
     const r = Math.round(best.r / best.count);
     const g = Math.round(best.g / best.count);
     const b = Math.round(best.b / best.count);
@@ -238,6 +247,21 @@
       b,
       hex: rgbToHex(r, g, b)
     };
+  }
+
+  function formatOcrPreview(rawText, lines = null) {
+    const lineArr = Array.isArray(lines) && lines.length > 0
+      ? lines.map((l) => (typeof l === 'string' ? l : l && l.text ? l.text : '').trim()).filter(Boolean)
+      : String(rawText || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    if (lineArr.length >= 6) {
+      const totalWords = lineArr.reduce((acc, s) => acc + s.split(/\s+/).filter(Boolean).length, 0);
+      const avgWords = totalWords / lineArr.length;
+      const sentences = lineArr.filter((s) => /[.?!]$/.test(s)).length;
+      if (avgWords <= 3.2 && sentences < 2) {
+        return `Sidebar / menu (${lineArr.length} items)`;
+      }
+    }
+    return lineArr.join('  ').replace(/\s+/g, ' ').trim();
   }
 
   /**
@@ -342,6 +366,7 @@
     evaluateMathExpression,
     rgbToHex,
     extractDominantColor,
+    formatOcrPreview,
     analyzeRegionDetail,
     shouldApplyWebDarkCss,
     buildSearchUrl

@@ -7,6 +7,7 @@
     displayHostForUrl,
     evaluateMathExpression,
     extractDominantColor,
+    formatOcrPreview,
     analyzeRegionDetail,
     shouldApplyWebDarkCss,
     buildSearchUrl
@@ -153,7 +154,6 @@
     document.getElementById('sheet-brand').innerHTML = Icons.brandMark(18);
     const aiCardBrand = document.getElementById('ai-card-brand');
     if (aiCardBrand) aiCardBrand.innerHTML = Icons.brandMark(15);
-    document.getElementById('sheet-dark-btn').innerHTML = Icons.moon(13);
     document.getElementById('sheet-pin-btn').innerHTML = Icons.pin(13);
     document.getElementById('sheet-ext-btn').innerHTML = Icons.external(13);
     document.getElementById('sheet-expand-btn').innerHTML = Icons.expand(13);
@@ -966,23 +966,32 @@
 
   function placeResultsSheet(rect) {
     const margin = 18;
-    const sheetW = resultsSheet.offsetWidth || 440;
-    const sheetH = resultsSheet.offsetHeight || 584;
-    const maxY = screenH - (safeInsets.bottom || 0) - 82 - sheetH;
-    const clampedY = Math.max(margin + (safeInsets.top || 0), Math.min(maxY, rect.y - 12));
+    const sheetW = Math.min(720, screenW - margin * 2);
+    const maxSheetH = Math.max(400, screenH - (safeInsets.bottom || 0) - 86 - (safeInsets.top || 0) - margin);
+    const sheetH = Math.min(740, maxSheetH);
+    resultsSheet.style.width = `${Math.round(sheetW)}px`;
+    resultsSheet.style.height = `${Math.round(sheetH)}px`;
 
+    const minY = margin + (safeInsets.top || 0);
+    const maxY = screenH - (safeInsets.bottom || 0) - 82 - sheetH;
+    const clampedY = Math.max(minY, Math.min(maxY, rect.y - 12));
+
+    const spaceRight = screenW - margin - (rect.x + rect.w + margin);
+    const spaceLeft = rect.x - margin - margin;
     let x;
-    if (rect.x + rect.w + margin + sheetW <= screenW - margin) {
+    if (spaceRight >= sheetW) {
       x = rect.x + rect.w + margin;
-    } else if (rect.x - margin - sheetW >= margin) {
+    } else if (spaceLeft >= sheetW) {
       x = rect.x - margin - sheetW;
+    } else if (spaceRight >= spaceLeft) {
+      x = Math.max(margin, Math.min(screenW - sheetW - margin, rect.x + rect.w + margin));
     } else {
-      x = Math.max(margin, Math.min(screenW - sheetW - margin, screenW - sheetW - 24));
+      x = Math.max(margin, Math.min(screenW - sheetW - margin, rect.x - margin - sheetW));
     }
 
     const finalX = Math.round(x);
     const finalY = Math.round(clampedY);
-    dockedSheetRect = { x: finalX, y: finalY, w: sheetW, h: sheetH };
+    dockedSheetRect = { x: finalX, y: finalY, w: Math.round(sheetW), h: Math.round(sheetH) };
 
     const rawDx = (rect.x + rect.w / 2) - (finalX + sheetW / 2);
     const rawDy = (rect.y + rect.h / 2) - (finalY + sheetH / 2);
@@ -1088,6 +1097,8 @@
     addChip(`${Icons.sparkle(12)}<span>Explain</span>`, () => runExplainAi(), true);
     addChip(`${Icons.pin(12)}<span>Pin</span>`, () => pinCurrentCapture());
     addChip(`${Icons.save(12)}<span>Save</span>`, () => window.loopSearch.saveCapturePng(lastCropPngBase64));
+    addChip(`<span>Overview</span>`, () => scrollWebResults(false));
+    addChip(`<span>Visual matches</span>`, () => scrollWebResults(true));
     staggerReveal(smartChipsBar.children, 24, 24);
 
     if (isLowInfo && !ocrText && !qrPayload) {
@@ -1148,10 +1159,11 @@
     const ocrPromise = window.loopSearch.runOcr(cropped.pngBase64).then((res) => {
       const txt = (res && res.text ? res.text : '').trim();
       lastOcrText = txt;
-      if (txt) {
+      const preview = formatOcrPreview(txt, res && res.lines ? res.lines : null);
+      if (preview) {
         ocrPreviewLine.style.display = 'block';
-        ocrPreviewLine.textContent = txt.replace(/\s+/g, ' ');
-        if (settings.autoCopyOcrText) {
+        ocrPreviewLine.textContent = preview;
+        if (settings.autoCopyOcrText && txt) {
           window.loopSearch.copyText(txt);
         }
       }
@@ -1198,6 +1210,25 @@
     }
   }
 
+  async function scrollWebResults(toVisualMatches) {
+    try {
+      const js = !toVisualMatches
+        ? "window.scrollTo({ top: 0, behavior: 'smooth' });"
+        : `(function(){
+            var nodes = document.querySelectorAll('h1, h2, h3, [role="heading"], div, span');
+            for (var i = 0; i < nodes.length; i++) {
+              var t = (nodes[i].textContent || '').trim();
+              if (/^(Visual matches|Exact matches|Related searches|Similar images)$/i.test(t)) {
+                nodes[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                return;
+              }
+            }
+            window.scrollTo({ top: Math.max(420, Math.round(document.body.scrollHeight * 0.45)), behavior: 'smooth' });
+          })();`;
+      await webview.executeJavaScript(js, false);
+    } catch {}
+  }
+
   async function runExplainAi(customPrompt = null) {
     const prompt =
       customPrompt ||
@@ -1205,15 +1236,23 @@
         ? followUpInput.value.trim()
         : 'Explain clearly what is shown in this captured region.');
 
+    aiAnswerCard.style.display = 'flex';
     if (settings.hasGeminiApiKey) {
-      aiAnswerCard.style.display = 'flex';
       aiAnswerText.textContent = 'Thinking with Gemini 2.5 Flash...';
       const res = await window.loopSearch.callGemini({
         imageBase64: lastCropJpegBase64,
         prompt
       });
-      aiAnswerText.textContent = res.ok ? res.answer : `AI Error: ${res.error}`;
-      return;
+      if (res.ok) {
+        aiAnswerText.textContent = res.answer;
+        return;
+      }
+      aiAnswerText.textContent = `Gemini error (${res.error}). Showing local summary below — or try AI Mode.`;
+    } else {
+      const snippet = lastOcrText ? lastOcrText.replace(/\s+/g, ' ').slice(0, 160) : '';
+      aiAnswerText.textContent = snippet
+        ? `Recognized text: “${snippet}”\n\nAdd a free Gemini API key in LoopSearch Studio → AI & Account for instant visual explanations.`
+        : `Selected region (${lastCropW}×${lastCropH} px) — see Google AI overview & visual matches below, or add a free Gemini API key in LoopSearch Studio for in-card answers.`;
     }
 
     const q = lastOcrText ? `${prompt}: ${lastOcrText}` : prompt;
@@ -1339,11 +1378,6 @@
       navigateWebview(buildSearchUrl(activeEngine, lastOcrText));
     }
   };
-  document.getElementById('sheet-dark-btn').onclick = () => {
-    webDarkMode = !webDarkMode;
-    document.getElementById('sheet-dark-btn').innerHTML = webDarkMode ? Icons.moon(13) : Icons.sun(13);
-    syncWebviewTheme();
-  };
   document.getElementById('sheet-pin-btn').onclick = pinCurrentCapture;
   document.getElementById('sheet-ext-btn').onclick = () => {
     window.loopSearch.openExternal(currentWebUrl || lastLensUrl || 'https://lens.google.com/');
@@ -1351,8 +1385,10 @@
   document.getElementById('sheet-expand-btn').onclick = () => {
     sheetExpanded = !sheetExpanded;
     resultsSheet.classList.add('resetting');
-    resultsSheet.style.width = sheetExpanded ? '556px' : '440px';
-    resultsSheet.style.height = sheetExpanded ? `${Math.min(720, screenH - 120)}px` : '584px';
+    const expandedW = Math.min(960, screenW - 36);
+    const defaultW = Math.min(720, screenW - 36);
+    resultsSheet.style.width = `${Math.round(sheetExpanded ? expandedW : defaultW)}px`;
+    resultsSheet.style.height = sheetExpanded ? `${Math.min(820, screenH - 88)}px` : `${Math.min(740, screenH - 108)}px`;
     setTimeout(() => resultsSheet.classList.remove('resetting'), 380);
   };
   document.getElementById('sheet-grab-pill').ondblclick = (e) => {
@@ -1362,8 +1398,8 @@
     resultsSheet.classList.add('resetting');
     resultsSheet.style.left = `${dockedSheetRect.x}px`;
     resultsSheet.style.top = `${dockedSheetRect.y}px`;
-    resultsSheet.style.width = '440px';
-    resultsSheet.style.height = '584px';
+    resultsSheet.style.width = `${dockedSheetRect.w}px`;
+    resultsSheet.style.height = `${dockedSheetRect.h}px`;
     setTimeout(() => resultsSheet.classList.remove('resetting'), 380);
   };
   document.getElementById('sheet-close-btn').onclick = () => {
@@ -1517,7 +1553,6 @@
 
     applyGlassAppearance(settings);
     document.getElementById('engine-cycle-btn').textContent = `${ENGINE_LABELS[activeEngine] || 'Google Lens'} ▾`;
-    document.getElementById('sheet-dark-btn').innerHTML = webDarkMode ? Icons.moon(13) : Icons.sun(13);
     promptCapsule.style.bottom = `${Math.max(18, (safeInsets.bottom || 0) + 18)}px`;
 
     setupCanvasSizes();

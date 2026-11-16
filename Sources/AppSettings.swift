@@ -379,13 +379,13 @@ enum AIService {
         if parts.isEmpty, let q = userQuery, !q.isEmpty {
             if !cleanOCR.isEmpty {
                 let wordCount = cleanOCR.split(separator: " ").count
-                let summary = cleanOCR.count > 110 ? String(cleanOCR.prefix(108)) + "…" : cleanOCR
+                let summary = cleanOCR.count > 160 ? String(cleanOCR.prefix(158)) + "…" : cleanOCR
                 parts.append("Key text (\(wordCount) words): “\(summary)”")
             } else if !classificationLabels.isEmpty {
-                let tags = classificationLabels.prefix(3).map { $0.capitalized }.joined(separator: ", ")
-                parts.append("Visual subject: \(tags) — see detailed AI overview & matches below")
+                let tags = classificationLabels.prefix(4).map { $0.capitalized }.joined(separator: ", ")
+                parts.append("Visual subject: \(tags) — see Google AI overview below, or add a free Gemini API key in Studio for full vision Q&A.")
             } else {
-                parts.append("Visual region (\(image.width)×\(image.height) px) — see AI overview & visual matches below")
+                parts.append("Visual selection (\(image.width)×\(image.height) px) — Google AI results are loading below. Add a free Gemini API key in Studio for instant in-card AI explanations.")
             }
         }
         return parts.joined(separator: " · ")

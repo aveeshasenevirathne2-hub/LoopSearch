@@ -166,52 +166,7 @@ function extractLensResultUrlFromHtml(html) {
  * Injects obsidian dark theme CSS + Google Lens chrome cleanup (eliminates double input boxes,
  * cobalt link highlight blocks, empty top spacers, and right-edge thumbnail clipping).
  */
-function buildLensDarkThemeInjectionScript(enableDark) {
-  const darkCss = `
-    :root, html, body {
-      color-scheme: dark !important;
-      background-color: #0b0b0d !important;
-      color: #e8eaed !important;
-    }
-    code, pre, kbd, samp, tt {
-      background-color: rgba(32, 33, 36, 0.92) !important;
-      color: #e8eaed !important;
-      border-color: rgba(255, 255, 255, 0.14) !important;
-    }
-    mark, mark * {
-      background-color: rgba(255, 255, 255, 0.12) !important;
-      color: #e8eaed !important;
-      border-radius: 4px !important;
-    }
-    code *, pre *, kbd *, samp * {
-      background-color: transparent !important;
-      color: inherit !important;
-    }
-    table, th, td, blockquote, details, summary {
-      background-color: rgba(24, 25, 28, 0.92) !important;
-      color: #e8eaed !important;
-      border-color: rgba(255, 255, 255, 0.12) !important;
-    }
-    input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([type="range"]),
-    textarea {
-      background-color: transparent !important;
-      background-image: none !important;
-      color: #e8eaed !important;
-      caret-color: #e8eaed !important;
-      border-color: transparent !important;
-      box-shadow: none !important;
-      outline: none !important;
-    }
-    input::placeholder, textarea::placeholder { color: #9aa0a6 !important; }
-    a:not([role="button"]), a:not([role="button"]) * {
-      background-color: transparent !important;
-      background-image: none !important;
-    }
-    img, picture, video, canvas { filter: none !important; }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.35); border-radius: 3px; }
-  `.replace(/\s+/g, ' ');
-
+function buildLensDarkThemeInjectionScript(_enableDark) {
   const cleanCss = `
     header, #searchform,
     #sfcnt, #tophf,
@@ -241,23 +196,6 @@ function buildLensDarkThemeInjectionScript(enableDark) {
     }
     div[data-attrid], div[data-hveid], section, c-wiz {
       margin-bottom: 4px !important;
-    }
-    a, [role="button"], button, div[data-hveid] > div, g-card, .g {
-      transition: transform 0.20s cubic-bezier(0.22, 1, 0.36, 1),
-                  box-shadow 0.22s ease,
-                  background-color 0.18s ease,
-                  border-color 0.18s ease,
-                  opacity 0.18s ease !important;
-    }
-    a img {
-      transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), filter 0.20s ease !important;
-    }
-    a:hover img {
-      transform: scale(1.028) !important;
-      filter: brightness(1.06) !important;
-    }
-    g-card:hover, div[jsaction] a:hover {
-      border-color: rgba(255, 255, 255, 0.18) !important;
     }
   `.replace(/\s+/g, ' ');
 
@@ -300,163 +238,25 @@ function buildLensDarkThemeInjectionScript(enableDark) {
     }
   `.replace(/\s+/g, ' ');
 
-  if (!enableDark) {
-    return `(function(){
-      var u = location.href.toLowerCase();
-      if (u.includes('/sorry') || u.includes('recaptcha') || u.includes('accounts.google.') || u.includes('consent.google.')) return;
-      window.__loopsearchDarkEnabled = false;
-      var el = document.getElementById('__loopsearch_dark_css');
-      if (el) el.remove();
-      if (window.__loopsearchDarkObs) {
-        window.__loopsearchDarkObs.disconnect();
-        window.__loopsearchDarkObs = null;
-      }
-      var ce = document.getElementById('__loopsearch_clean_css');
-      if (!ce && (document.head || document.documentElement)) {
-        ce = document.createElement('style');
-        ce.id = '__loopsearch_clean_css';
-        ce.textContent = ${JSON.stringify(cleanCss)};
-        (document.head || document.documentElement).appendChild(ce);
-      }
-      var bgEls = document.querySelectorAll('[data-cts-dark-bg]');
-      for (var i = 0; i < bgEls.length; i++) {
-        bgEls[i].style.removeProperty('background-color');
-        bgEls[i].style.removeProperty('border-color');
-        bgEls[i].removeAttribute('data-cts-dark-bg');
-      }
-      var fgEls = document.querySelectorAll('[data-cts-dark-fg]');
-      for (var j = 0; j < fgEls.length; j++) {
-        fgEls[j].style.removeProperty('color');
-        fgEls[j].removeAttribute('data-cts-dark-fg');
-      }
-      ${cleanJs}
-      runCleanPass();
-    })();`;
-  }
-
+  // Never override Google's colors/links via DOM CSS — let prefers-color-scheme handle Light/Dark cleanly.
   return `(function(){
     var u = location.href.toLowerCase();
-    if (u.includes('/sorry') || u.includes('recaptcha') || u.includes('accounts.google.') || u.includes('consent.google.')) {
-      var prev = document.getElementById('__loopsearch_dark_css');
-      if (prev) prev.remove();
-      return;
+    if (u.includes('/sorry') || u.includes('recaptcha') || u.includes('accounts.google.') || u.includes('consent.google.')) return;
+    var oldDark = document.getElementById('__loopsearch_dark_css');
+    if (oldDark) oldDark.remove();
+    if (window.__loopsearchDarkObs) {
+      window.__loopsearchDarkObs.disconnect();
+      window.__loopsearchDarkObs = null;
     }
-    window.__loopsearchDarkEnabled = true;
-    document.documentElement.style.colorScheme = 'dark';
-    function ensureStyle(id, css){
-      if (!document.head && !document.documentElement) return;
-      var style = document.getElementById(id);
-      if (!style) {
-        style = document.createElement('style');
-        style.id = id;
-        style.textContent = css;
-        (document.head || document.documentElement).appendChild(style);
-      }
+    var ce = document.getElementById('__loopsearch_clean_css');
+    if (!ce && (document.head || document.documentElement)) {
+      ce = document.createElement('style');
+      ce.id = '__loopsearch_clean_css';
+      ce.textContent = ${JSON.stringify(cleanCss)};
+      (document.head || document.documentElement).appendChild(ce);
     }
     ${cleanJs}
-    function applyDarkPass(){
-      if (!window.__loopsearchDarkEnabled || !document.body) return;
-      ensureStyle('__loopsearch_dark_css', ${JSON.stringify(darkCss)});
-      ensureStyle('__loopsearch_clean_css', ${JSON.stringify(cleanCss)});
-      runCleanPass();
-      var skipTags = { IMG:1, VIDEO:1, CANVAS:1, PICTURE:1, SOURCE:1, SVG:1, PATH:1, CIRCLE:1, RECT:1, POLYGON:1, SCRIPT:1, STYLE:1, LINK:1, META:1, NOSCRIPT:1, BR:1, HR:1, CODE:1, PRE:1, KBD:1, SAMP:1, MARK:1 };
-      var all = document.body.getElementsByTagName('*');
-      var vw = window.innerWidth || 420;
-      var vh = window.innerHeight || 640;
-      for (var i = 0; i < all.length; i++) {
-        var el = all[i];
-        if (skipTags[el.tagName]) continue;
-        var cs = window.getComputedStyle(el);
-        var bgi = cs.backgroundImage;
-        if (bgi && bgi.indexOf('gradient(') !== -1 && bgi.indexOf('url(') === -1 && /(255|248|249|250|241|243|244|238|232|229)/.test(bgi)) {
-          if ((el.textContent || '').trim().length < 36 && el.querySelector('img, textarea, input') === null) {
-            el.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(11, 11, 13, 0), rgba(11, 11, 13, 0.96))', 'important');
-          }
-        }
-        var isMediaWrap = el.querySelector('img, picture, video') !== null
-          && (el.innerText || '').trim().length < 28
-          && el.querySelector('textarea, input, [role="tab"]') === null;
-        if (isMediaWrap && el.tagName !== 'BODY' && el.tagName !== 'MAIN') {
-          el.style.setProperty('background-color', 'transparent', 'important');
-          el.setAttribute('data-cts-dark-bg', '1');
-          continue;
-        }
-        var bg = cs.backgroundColor;
-        if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
-          var m = bg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?\\)/);
-          if (m) {
-            var r = +m[1], g = +m[2], b = +m[3], a = m[4] !== undefined ? +m[4] : 1;
-            if ((el.tagName === 'SPAN' || el.tagName === 'EM') && a > 0.15 && b > 135 && (b - r) > 38 && g < 195) {
-              var wrapsLink = el.querySelector('a') !== null || el.closest('a') !== null;
-              el.style.setProperty('background-color', wrapsLink ? 'transparent' : 'rgba(255, 255, 255, 0.10)', 'important');
-              el.setAttribute('data-cts-dark-bg', '1');
-            } else if (a > 0.12 && r > 155 && g > 155 && b > 155) {
-              var isRoot = (el.tagName === 'BODY' || el.tagName === 'MAIN');
-              el.style.setProperty('background-color', isRoot ? '#0b0b0d' : 'rgba(24, 25, 28, 0.94)', 'important');
-              if (parseFloat(cs.borderTopWidth) > 0.2) el.style.setProperty('border-color', 'rgba(255, 255, 255, 0.12)', 'important');
-              el.setAttribute('data-cts-dark-bg', '1');
-            } else if (a > 0.72 && Math.max(r, g, b) <= 52 && (Math.max(r, g, b) - Math.min(r, g, b)) <= 10) {
-              if (el.getBoundingClientRect().width >= vw * 0.84) {
-                el.style.setProperty('background-color', '#0b0b0d', 'important');
-                el.setAttribute('data-cts-dark-bg', '1');
-              }
-            }
-          }
-        }
-        var fg = cs.color;
-        if (fg) {
-          var fm = fg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
-          if (fm && Math.max(+fm[1], +fm[2], +fm[3]) < 168) {
-            var isSecondary = Math.min(+fm[1], +fm[2], +fm[3]) > 78;
-            el.style.setProperty('color', isSecondary ? '#9aa0a6' : '#e8eaed', 'important');
-            el.setAttribute('data-cts-dark-fg', '1');
-          }
-        }
-      }
-      var composers = document.querySelectorAll('textarea, input[type="text"], input:not([type])');
-      for (var c = 0; c < composers.length; c++) {
-        var inp = composers[c];
-        var ir = inp.getBoundingClientRect();
-        if (ir.width < 120 || ir.bottom < vh * 0.52) continue;
-        var pill = inp.closest('form') || inp.parentElement;
-        var p = inp.parentElement;
-        for (var up = 0; up < 4 && p && p !== document.body; up++) {
-          var pr = p.getBoundingClientRect();
-          if (pr.width >= 200 && pr.height >= 42 && pr.height <= 170) pill = p;
-          p = p.parentElement;
-        }
-        if (pill) {
-          pill.style.setProperty('background-color', 'rgba(24, 25, 28, 0.96)', 'important');
-          pill.style.setProperty('border', '1px solid rgba(255, 255, 255, 0.14)', 'important');
-          pill.style.setProperty('border-radius', '20px', 'important');
-          pill.style.setProperty('box-shadow', '0 4px 18px rgba(0, 0, 0, 0.35)', 'important');
-          pill.style.setProperty('overflow', 'hidden', 'important');
-          pill.setAttribute('data-cts-keep', '1');
-        }
-        var dock = pill ? pill.parentElement : null;
-        while (dock && dock !== document.body) {
-          var dcs = window.getComputedStyle(dock);
-          if (dcs.position === 'fixed' || dcs.position === 'sticky') {
-            dock.style.setProperty('background-color', '#090e1a', 'important');
-            dock.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(9, 14, 26, 0.92), #090e1a 16px)', 'important');
-            dock.style.setProperty('padding-top', '6px', 'important');
-            dock.setAttribute('data-cts-keep', '1');
-            break;
-          }
-          dock = dock.parentElement;
-        }
-      }
-    }
-    applyDarkPass();
-    if (!window.__loopsearchDarkObs && document.documentElement) {
-      var queued = false;
-      window.__loopsearchDarkObs = new MutationObserver(function(){
-        if (queued) return;
-        queued = true;
-        requestAnimationFrame(function(){ queued = false; applyDarkPass(); });
-      });
-      window.__loopsearchDarkObs.observe(document.documentElement, { childList: true, subtree: true });
-    }
+    runCleanPass();
   })();`;
 }
 

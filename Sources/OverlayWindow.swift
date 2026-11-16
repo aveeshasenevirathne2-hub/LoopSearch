@@ -2491,57 +2491,53 @@ private final class OverlayCanvasView: NSView {
         let spaceLeft = rect.minX - usableLeft - gap
 
         var candidates: [(rect: CGRect, score: CGFloat)] = []
-        let sideHeight = min(760, usableHeight * 0.88)
-        let vertWidth = min(780, usableWidth)
+        let sideHeight = min(820, usableHeight * 0.92)
+        let vertWidth = min(760, usableWidth)
 
-        if spaceRight >= 330 {
-            let w = min(520, spaceRight)
+        if spaceRight >= 440 {
+            let w = min(720, spaceRight)
             let rawY = rect.midY - sideHeight / 2
             let y = max(usableTop, min(usableBottom - sideHeight, rawY))
             let x = min(usableRight - w, rect.maxX + gap)
-            // Side-by-side panels feel most natural for reading beside an image/text
-            let bonus: CGFloat = (w >= 420) ? 1.18 : 1.0
+            let bonus: CGFloat = (w >= 700) ? 1.32 : (w >= 560 ? 1.15 : 0.95)
             candidates.append((CGRect(x: x, y: y, width: w, height: sideHeight), w * sideHeight * bonus))
         }
 
-        if spaceLeft >= 330 {
-            let w = min(520, spaceLeft)
+        if spaceLeft >= 440 {
+            let w = min(720, spaceLeft)
             let rawY = rect.midY - sideHeight / 2
             let y = max(usableTop, min(usableBottom - sideHeight, rawY))
             let x = max(usableLeft, rect.minX - gap - w)
-            let bonus: CGFloat = (w >= 420) ? 1.14 : 0.98
+            let bonus: CGFloat = (w >= 700) ? 1.28 : (w >= 560 ? 1.12 : 0.92)
             candidates.append((CGRect(x: x, y: y, width: w, height: sideHeight), w * sideHeight * bonus))
         }
 
-        if spaceBelow >= 350 {
-            let h = min(640, spaceBelow)
+        if spaceBelow >= 360 {
+            let h = min(680, spaceBelow)
             let rawX = rect.midX - vertWidth / 2
             let x = max(usableLeft, min(usableRight - vertWidth, rawX))
             let y = min(usableBottom - h, rect.maxY + gap)
-            candidates.append((CGRect(x: x, y: y, width: vertWidth, height: h), vertWidth * h))
+            candidates.append((CGRect(x: x, y: y, width: vertWidth, height: h), vertWidth * h * 1.05))
         }
 
-        if spaceAbove >= 350 {
-            let h = min(600, spaceAbove)
+        if spaceAbove >= 360 {
+            let h = min(660, spaceAbove)
             let rawX = rect.midX - vertWidth / 2
             let x = max(usableLeft, min(usableRight - vertWidth, rawX))
             let y = max(usableTop, rect.minY - gap - h)
-            candidates.append((CGRect(x: x, y: y, width: vertWidth, height: h), vertWidth * h * 0.96))
+            candidates.append((CGRect(x: x, y: y, width: vertWidth, height: h), vertWidth * h))
         }
 
         if let best = candidates.max(by: { $0.score < $1.score }) {
             return best.rect
         }
 
-        // Only if the selection spans almost the entire viewport, tuck cleanly into the right edge
-        let w = min(480, usableWidth * 0.85)
-        let h = min(620, usableHeight * 0.80)
-        return CGRect(
-            x: usableRight - w,
-            y: usableBottom - h,
-            width: w,
-            height: h
-        )
+        // Only if the selection spans almost the entire viewport, tuck cleanly inside screen edges
+        let w = min(720, usableWidth * 0.90)
+        let h = min(760, usableHeight * 0.88)
+        let x = max(usableLeft, min(usableRight - w, usableRight - w))
+        let y = max(usableTop, min(usableBottom - h, usableBottom - h))
+        return CGRect(x: x, y: y, width: w, height: h)
     }
 
     private func copyImageToClipboard(_ image: CGImage) {
@@ -3503,29 +3499,12 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         webView.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         webView.setValue(false, forKey: "drawsBackground")
         webView.underPageBackgroundColor = dark
-            ? NSColor(red: 0.035, green: 0.055, blue: 0.10, alpha: 1.0)
+            ? NSColor(white: 0.07, alpha: 1.0)
             : NSColor(white: 0.98, alpha: 1.0)
-        updateWebThemeButtonUI(dark: dark)
-
-        if let current = webView.url, current.host?.contains("google.") == true, !current.path.hasPrefix("/sorry") {
-            webView.evaluateJavaScript(Self.webColorSchemeScript(dark: dark), completionHandler: nil)
-        }
     }
 
     private func updateWebThemeButtonUI(dark: Bool) {
-        guard webThemeButton != nil else { return }
-        let mode = AppSettings.shared.webResultsTheme
-        let symbol: String
-        switch mode {
-        case .system:
-            symbol = "circle.lefthalf.filled"
-        case .dark:
-            symbol = "moon.fill"
-        case .light:
-            symbol = "sun.max.fill"
-        }
-        webThemeButton.updateSymbol(symbol, pointSize: 10.5, weight: .medium)
-        webThemeButton.toolTip = "Web Results Mode: \(mode.title) (\(dark ? "Dark" : "Light")) — Click to switch"
+        _ = dark
     }
 
     func prepareForClose() {
@@ -3814,8 +3793,10 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
         resizeHandleView.onDragDelta = { [weak self] delta in
             guard let self else { return }
-            let newW = max(400, min(1040, self.frame.width + delta.width))
-            let newH = max(420, min(920, self.frame.height + delta.height))
+            let maxAllowedW = max(920, (self.superview?.bounds.width ?? 1440) - 24)
+            let maxAllowedH = max(760, (self.superview?.bounds.height ?? 960) - 48)
+            let newW = max(440, min(maxAllowedW, self.frame.width + delta.width))
+            let newH = max(420, min(maxAllowedH, self.frame.height + delta.height))
             let newOriginY = self.frame.maxY - newH
             let allowed = self.allowedOrigins(CGSize(width: newW, height: newH))
             let clampedX = max(allowed.minX, min(allowed.maxX, self.frame.origin.x))
@@ -4009,12 +3990,6 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         }
         copyBtn.setAccessibilityLabel("Copy Text or Image")
 
-        webThemeButton = makeGlassCircleButton(symbol: "circle.lefthalf.filled", pointSize: 10.5, weight: .medium, tooltip: "Switch Web Results Light/Dark Mode") { [weak self] in
-            self?.cycleWebResultsTheme()
-        }
-        webThemeButton.setAccessibilityLabel("Switch Web Results Theme")
-        updateWebThemeButtonUI(dark: isEffectiveDarkMode)
-
         moreButton = makeGlassCircleButton(symbol: "ellipsis", pointSize: 11.0, weight: .bold, tooltip: "More Actions (Sticker, Save, Expand, Browser)") { [weak self] in
             self?.showMoreActionsMenu()
         }
@@ -4028,7 +4003,6 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         let actionsGroup = LiquidGlassGroupView(spacing: 4)
         actionsGroup.stackView.addArrangedSubview(pinBtn)
         actionsGroup.stackView.addArrangedSubview(copyBtn)
-        actionsGroup.stackView.addArrangedSubview(webThemeButton)
         actionsGroup.stackView.addArrangedSubview(moreButton)
         actionsGroup.stackView.addArrangedSubview(closeBtn)
 
@@ -4266,6 +4240,13 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         }
         colorHexChip.isHidden = true
 
+        let overviewJumpBtn = makeGlassChip(title: "Overview", symbol: "doc.text.magnifyingglass") { [weak self] in
+            self?.scrollWebResults(toVisualMatches: false)
+        }
+        let visualMatchesJumpBtn = makeGlassChip(title: "Visual matches", symbol: "photo.stack") { [weak self] in
+            self?.scrollWebResults(toVisualMatches: true)
+        }
+
         actionChipsStack = NSStackView(views: [
             searchActionBtn,
             openLinkChip,
@@ -4273,7 +4254,9 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             translateActionBtn,
             copyTextChip,
             explainActionBtn,
-            colorHexChip
+            colorHexChip,
+            overviewJumpBtn,
+            visualMatchesJumpBtn
         ])
         actionChipsStack.orientation = .horizontal
         actionChipsStack.alignment = .centerY
@@ -4322,7 +4305,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         aiAnswerLabel.textColor = .labelColor
         aiAnswerLabel.usesSingleLineMode = false
         aiAnswerLabel.lineBreakMode = .byTruncatingTail
-        aiAnswerLabel.maximumNumberOfLines = 2
+        aiAnswerLabel.maximumNumberOfLines = 6
         aiAnswerLabel.cell?.wraps = true
         aiAnswerLabel.cell?.truncatesLastVisibleLine = true
         aiAnswerLabel.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
@@ -5003,7 +4986,6 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             guard let self else { return }
             if let current = self.webView.url, current.host?.contains("google.") == true, !current.path.hasPrefix("/sorry") {
                 self.webView.evaluateJavaScript(Self.googleLensCleanUpScript, completionHandler: nil)
-                self.webView.evaluateJavaScript(Self.webColorSchemeScript(dark: self.isEffectiveDarkMode), completionHandler: nil)
             }
         }
     }
@@ -5061,7 +5043,6 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                         baseLensURL = current
                     }
                     webView.evaluateJavaScript(Self.googleLensCleanUpScript, completionHandler: nil)
-                    webView.evaluateJavaScript(Self.webColorSchemeScript(dark: isEffectiveDarkMode), completionHandler: nil)
                 }
             }
         }
@@ -5353,6 +5334,29 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             showLoadingOverlay(status: "Asking AI…")
             webView.load(URLRequest(url: url))
         }
+    }
+
+    private func scrollWebResults(toVisualMatches: Bool) {
+        guard webView != nil else { return }
+        let js: String
+        if !toVisualMatches {
+            js = "window.scrollTo({ top: 0, behavior: 'smooth' });"
+        } else {
+            js = """
+            (function() {
+                var headings = document.querySelectorAll('h1, h2, h3, [role="heading"], div, span');
+                for (var i = 0; i < headings.length; i++) {
+                    var txt = (headings[i].textContent || '').trim();
+                    if (/^(Visual matches|Exact matches|Related searches|Similar images)$/i.test(txt)) {
+                        headings[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        return;
+                    }
+                }
+                window.scrollTo({ top: Math.max(420, Math.round(document.body.scrollHeight * 0.45)), behavior: 'smooth' });
+            })();
+            """
+        }
+        webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
     @objc private func handleCopyAIExplanation() {

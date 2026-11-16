@@ -260,14 +260,16 @@
       flex-shrink: 0;
     }
 
-    /* Floating Results Sheet (Concentric 24px -> 14px Geometry + Spatial Spring Emergence) */
+    /* Floating Results Sheet (720px default width, full remaining height, spatial emergence) */
     #results-sheet {
       position: absolute;
       z-index: 30;
-      width: 440px;
-      height: 584px;
-      min-width: 344px;
-      min-height: 360px;
+      width: min(720px, calc(100vw - 36px));
+      height: min(740px, calc(100vh - 108px));
+      min-width: 420px;
+      min-height: 400px;
+      max-width: calc(100vw - 24px);
+      max-height: calc(100vh - 84px);
       display: none;
       flex-direction: column;
       border-radius: 24px;
@@ -757,7 +759,6 @@
         </div>
         <div class="sheet-grab-pill" id="sheet-grab-pill" title="Drag to move • Double-click to reset"></div>
         <div class="sheet-actions">
-          <button class="cap-icon-btn" id="sheet-dark-btn" title="Toggle Webview Theme"></button>
           <button class="cap-icon-btn" id="sheet-pin-btn" title="Pin Crop (P)"></button>
           <button class="cap-icon-btn" id="sheet-ext-btn" title="Open in Browser"></button>
           <button class="cap-icon-btn" id="sheet-expand-btn" title="Expand / Restore"></button>
