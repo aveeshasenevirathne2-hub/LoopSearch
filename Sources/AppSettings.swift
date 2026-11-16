@@ -1029,6 +1029,8 @@ final class CaptureHistoryStore {
     static let shared = CaptureHistoryStore()
     private(set) var items: [CaptureHistoryItem] = []
     private var searchIndex: [UUID: String] = [:]
+    private var encodedCache: [UUID: Data] = [:]
+    private var pendingPersistTask: Task<Void, Never>?
     private let maxItems = 40
     private static let rgbColorSpace = CGColorSpaceCreateDeviceRGB()
     private static let encryptedFileName = "history.enc.json"
@@ -1038,7 +1040,7 @@ final class CaptureHistoryStore {
     }
 
     func record(cgImage: CGImage, recognizedText: String = "", dominantHex: String = "") {
-        let boundedImage = Self.capDimensionForHistory(cgImage, maxDimension: 1200)
+        let boundedImage = Self.capDimensionForHistory(cgImage, maxDimension: 720)
         let entry = CaptureHistoryItem(
             timestamp: Date(),
             cgImage: boundedImage,
@@ -1048,7 +1050,7 @@ final class CaptureHistoryStore {
         items.insert(entry, at: 0)
         searchIndex[entry.id] = "\(recognizedText) \(dominantHex)".lowercased()
         pruneExpiredAndExcess()
-        persistToEncryptedDisk()
+        schedulePersistToEncryptedDisk()
         AppSettings.shared.recordCompletedSearchUse()
         NotificationCenter.default.post(name: .circleToSearchHistoryChanged, object: nil)
     }
@@ -1068,27 +1070,64 @@ final class CaptureHistoryStore {
         }
         let validIDs = Set(items.map(\.id))
         searchIndex = searchIndex.filter { validIDs.contains($0.key) }
+        encodedCache = encodedCache.filter { validIDs.contains($0.key) }
     }
 
-    private func persistToEncryptedDisk() {
-        let encoded: [PersistedHistoryEntry] = items.compactMap { item in
-            let rep = NSBitmapImageRep(cgImage: item.cgImage)
-            guard let png = rep.representation(using: .png, properties: [:]) else { return nil }
-            return PersistedHistoryEntry(
-                id: item.id,
-                timestamp: item.timestamp.timeIntervalSince1970,
-                pngData: png,
-                recognizedText: item.recognizedText,
-                dominantHex: item.dominantHex
-            )
-        }
-        guard let json = try? JSONEncoder().encode(encoded) else { return }
-        let key = KeychainHelper.loadOrCreateHistoryKey()
-        guard let sealed = try? AES.GCM.seal(json, using: key),
-              let combined = sealed.combined else { return }
+    private func schedulePersistToEncryptedDisk() {
+        pendingPersistTask?.cancel()
+        let snapshot = items
+        let existingCache = encodedCache
         let url = historyFileURL()
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? combined.write(to: url, options: [.atomic, .completeFileProtection])
+        pendingPersistTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 550_000_000)
+            guard !Task.isCancelled else { return }
+
+            let result: ([UUID: Data], Data?) = await Task.detached(priority: .utility) {
+                var updatedCache = existingCache
+                var encodedEntries: [PersistedHistoryEntry] = []
+                encodedEntries.reserveCapacity(snapshot.count)
+
+                for item in snapshot {
+                    let imgData: Data
+                    if let cached = updatedCache[item.id] {
+                        imgData = cached
+                    } else if let jpg = Self.encodeHistoryJPEG(item.cgImage) {
+                        updatedCache[item.id] = jpg
+                        imgData = jpg
+                    } else {
+                        continue
+                    }
+                    encodedEntries.append(PersistedHistoryEntry(
+                        id: item.id,
+                        timestamp: item.timestamp.timeIntervalSince1970,
+                        pngData: imgData,
+                        recognizedText: item.recognizedText,
+                        dominantHex: item.dominantHex
+                    ))
+                }
+                let json = try? JSONEncoder().encode(encodedEntries)
+                return (updatedCache, json)
+            }.value
+
+            guard !Task.isCancelled, let self else { return }
+            for (id, data) in result.0 where self.encodedCache[id] == nil {
+                self.encodedCache[id] = data
+            }
+            guard let json = result.1 else { return }
+            let key = KeychainHelper.loadOrCreateHistoryKey()
+            await Task.detached(priority: .utility) {
+                guard let sealed = try? AES.GCM.seal(json, using: key),
+                      let combined = sealed.combined else { return }
+                try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? combined.write(to: url, options: [.atomic, .completeFileProtection])
+            }.value
+        }
+    }
+
+    private static nonisolated func encodeHistoryJPEG(_ image: CGImage) -> Data? {
+        let rep = NSBitmapImageRep(cgImage: image)
+        return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.80])
+            ?? rep.representation(using: .png, properties: [:])
     }
 
     private func loadFromEncryptedDisk() {
@@ -1104,6 +1143,7 @@ final class CaptureHistoryStore {
             guard let img = NSImage(data: row.pngData)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
                 return nil
             }
+            encodedCache[row.id] = row.pngData
             return CaptureHistoryItem(
                 id: row.id,
                 timestamp: Date(timeIntervalSince1970: row.timestamp),
@@ -1152,13 +1192,15 @@ final class CaptureHistoryStore {
         items[0].recognizedText = text
         items[0].dominantHex = dominantHex
         searchIndex[items[0].id] = "\(text) \(dominantHex)".lowercased()
-        persistToEncryptedDisk()
+        schedulePersistToEncryptedDisk()
         NotificationCenter.default.post(name: .circleToSearchHistoryChanged, object: nil)
     }
 
     func clear() {
+        pendingPersistTask?.cancel()
         items.removeAll()
         searchIndex.removeAll()
+        encodedCache.removeAll()
         try? FileManager.default.removeItem(at: historyFileURL())
         NotificationCenter.default.post(name: .circleToSearchHistoryChanged, object: nil)
     }

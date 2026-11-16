@@ -30,10 +30,23 @@ enum GoogleLensService {
     // Standard desktop Safari UA so Google Lens serves the clean desktop multi-column results layout
     static let desktopSafariUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
 
+    private static let uploadSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.httpMaximumConnectionsPerHost = 4
+        config.timeoutIntervalForRequest = 18
+        config.timeoutIntervalForResource = 25
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
+
     static func uploadImage(_ image: CGImage, existingCookies: [HTTPCookie] = []) async throws -> LensUploadResult {
-        guard let imageData = encodeOptimizedJPEG(image) else {
-            throw GoogleLensError.imageEncodingFailed
-        }
+        let imageData: Data = try await Task.detached(priority: .userInitiated) {
+            guard let data = encodeOptimizedJPEG(image) else {
+                throw GoogleLensError.imageEncodingFailed
+            }
+            return data
+        }.value
 
         let boundary = "----CircleToSearch\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
         var body = Data()
@@ -50,26 +63,21 @@ enum GoogleLensService {
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "POST"
         request.httpBody = body
-        request.timeoutInterval = 20
+        request.timeoutInterval = 18
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.setValue(desktopSafariUserAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("https://lens.google.com", forHTTPHeaderField: "Origin")
         request.setValue("https://lens.google.com/", forHTTPHeaderField: "Referer")
 
-        let config = URLSessionConfiguration.default
         if !existingCookies.isEmpty {
             let cookieStorage = HTTPCookieStorage.shared
-            for cookie in existingCookies {
+            for cookie in existingCookies where cookie.domain.contains("google.") {
                 cookieStorage.setCookie(cookie)
             }
-            config.httpCookieStorage = cookieStorage
         }
 
         let delegate = RedirectCatchingDelegate()
-        let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
-
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await uploadSession.data(for: request, delegate: delegate)
 
         var capturedCookies = delegate.cookies
         if capturedCookies.isEmpty,
@@ -108,7 +116,7 @@ enum GoogleLensService {
     private static let rgbColorSpace = CGColorSpaceCreateDeviceRGB()
 
     private static func encodeOptimizedJPEG(_ image: CGImage) -> Data? {
-        let maxDim: CGFloat = 1200
+        let maxDim: CGFloat = 960
         let width = CGFloat(image.width)
         let height = CGFloat(image.height)
         let scale = min(1.0, maxDim / max(width, height))
@@ -141,7 +149,7 @@ enum GoogleLensService {
             nil
         ) {
             let options: [CFString: Any] = [
-                kCGImageDestinationLossyCompressionQuality: 0.86
+                kCGImageDestinationLossyCompressionQuality: 0.78
             ]
             CGImageDestinationAddImage(destination, finalImage, options as CFDictionary)
             if CGImageDestinationFinalize(destination) {
@@ -150,7 +158,7 @@ enum GoogleLensService {
         }
 
         let rep = NSBitmapImageRep(cgImage: finalImage)
-        return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.86])
+        return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.78])
             ?? rep.representation(using: .png, properties: [:])
     }
 }

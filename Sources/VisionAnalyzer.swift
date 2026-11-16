@@ -65,10 +65,19 @@ enum VisionAnalyzer {
                 let classifyRequest = VNClassifyImageRequest()
 
                 let ocrHandler = VNImageRequestHandler(cgImage: ocrImage, options: [:])
-                try? ocrHandler.perform([textRequest])
-
                 let imageHandler = VNImageRequestHandler(cgImage: image, options: [:])
-                try? imageHandler.perform([barcodeRequest, classifyRequest])
+                let visionGroup = DispatchGroup()
+                visionGroup.enter()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    try? ocrHandler.perform([textRequest])
+                    visionGroup.leave()
+                }
+                visionGroup.enter()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    try? imageHandler.perform([barcodeRequest, classifyRequest])
+                    visionGroup.leave()
+                }
+                visionGroup.wait()
 
                 var rawBlocks: [RecognizedTextBlock] = []
                 var confidences: [Float] = []
@@ -183,13 +192,13 @@ enum VisionAnalyzer {
         }
     }
 
-    /// Upscales small crops (< 600px) 2x–3x before Vision OCR for crisp small-text accuracy.
+    /// Upscales tiny crops (< 420px) 2x before Vision OCR without bloating larger captures.
     private static func upscaleSmallCropIfNeeded(_ image: CGImage) -> CGImage {
         let minDim = min(image.width, image.height)
-        guard minDim > 0, minDim < 600 else { return image }
-        let factor = minDim < 220 ? 3 : 2
-        let targetW = min(2400, image.width * factor)
-        let targetH = min(2400, image.height * factor)
+        guard minDim > 0, minDim < 420 else { return image }
+        let factor = minDim < 160 ? 3 : 2
+        let targetW = min(1600, image.width * factor)
+        let targetH = min(1600, image.height * factor)
         guard let ctx = CGContext(
             data: nil,
             width: targetW,

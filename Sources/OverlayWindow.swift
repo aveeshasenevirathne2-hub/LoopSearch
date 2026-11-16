@@ -92,6 +92,7 @@ final class OverlayWindowController {
 
         rootView?.playExitAnimation { [weak self] in
             window.orderOut(nil)
+            window.contentView = nil
             self?.window = nil
             self?.rootView = nil
             self?.isClosing = false
@@ -103,6 +104,7 @@ final class OverlayWindowController {
     private func immediateClose() {
         rootView?.stopDisplayLink()
         window?.orderOut(nil)
+        window?.contentView = nil
         window = nil
         rootView = nil
         isClosing = false
@@ -790,6 +792,8 @@ private final class OverlayCanvasView: NSView {
 
     private var displayLink: CADisplayLink?
     private var isHighRateActive: Bool = true
+    private var isIdleSheetRate: Bool = false
+    private var idleTickDivider: Int = 0
     private var startTime: CFTimeInterval = CACurrentMediaTime()
     private var lastTickTime: CFTimeInterval = CACurrentMediaTime()
 
@@ -921,17 +925,23 @@ private final class OverlayCanvasView: NSView {
         startTime = now
         lastTickTime = now
         let link = displayLink(target: self, selector: #selector(handleDisplayTick(_:)))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 60)
         isHighRateActive = true
+        isIdleSheetRate = false
         link.add(to: .main, forMode: .common)
         self.displayLink = link
     }
 
     private func updateDisplayLinkRateIfNeeded(elapsed t: CFTimeInterval) {
-        // Keep full 60-120Hz ProMotion active throughout the overlay session for butter-smooth springs & dragging
-        guard !isHighRateActive, let link = displayLink else { return }
-        isHighRateActive = true
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        let shouldRelax = (resultsSheet != nil && !isDragging)
+        guard let link = displayLink, shouldRelax != isIdleSheetRate else { return }
+        isIdleSheetRate = shouldRelax
+        isHighRateActive = !shouldRelax
+        if shouldRelax {
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 20, maximum: 30, preferred: 30)
+        } else {
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 60)
+        }
     }
 
     func stopDisplayLink() {
@@ -942,50 +952,57 @@ private final class OverlayCanvasView: NSView {
     @objc private func handleDisplayTick(_ link: CADisplayLink) {
         let now = CACurrentMediaTime()
         let t = now - startTime
-        let dt = min(1.0 / 30.0, max(0.0, now - lastTickTime))
+        let dt = min(1.0 / 24.0, max(0.0, now - lastTickTime))
         lastTickTime = now
         updateDisplayLinkRateIfNeeded(elapsed: t)
+        idleTickDivider = (idleTickDivider + 1) & 3
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        // 1. Soft flowing rounded perimeter glow (gentle & non-distracting)
         let gMult = glowMultiplier
-        let breathe = 0.78 + 0.14 * sin(t * 1.7)
-        screenPerimeterGlow.opacity = min(1.0, Float(breathe * 0.48) * gMult)
-        screenPerimeterGlow.updateAnimation(time: t, speed: 1.05)
+        // While results panel is open, throttle expensive ambient gradient/star updates so WKWebView stays responsive
+        let updateHeavyBackdrop = (resultsSheet == nil || isDragging || (idleTickDivider & 1) == 0)
+        if updateHeavyBackdrop {
+            // 1. Soft flowing rounded perimeter glow (gentle & non-distracting)
+            let breathe = 0.78 + 0.14 * sin(t * 1.7)
+            screenPerimeterGlow.opacity = min(1.0, Float(breathe * 0.48) * gMult)
+            screenPerimeterGlow.updateAnimation(time: t, speed: 1.05)
 
-        // 2. Smoothly drifting ambient aurora clouds & soft bottom glowing bar
-        for item in auroraBlobs {
-            let x = item.base.x + item.rx * CGFloat(sin(t * item.speed + item.phase))
-            let y = item.base.y + item.ry * CGFloat(cos(t * item.speed * 0.8 + item.phase))
-            item.layer.position = CGPoint(x: x, y: y)
-        }
+            // 2. Smoothly drifting ambient aurora clouds & soft bottom glowing bar
+            for item in auroraBlobs {
+                let x = item.base.x + item.rx * CGFloat(sin(t * item.speed + item.phase))
+                let y = item.base.y + item.ry * CGFloat(cos(t * item.speed * 0.8 + item.phase))
+                item.layer.position = CGPoint(x: x, y: y)
+            }
 
-        let barShift1 = bounds.width * 0.13 * CGFloat(sin(t * 0.48))
-        let barShift2 = bounds.width * 0.15 * CGFloat(cos(t * 0.56 + 1.1))
-        bottomEdgeGlowPrimary.position = CGPoint(x: bounds.midX + barShift1, y: bounds.height - 14)
-        bottomEdgeGlowSecondary.position = CGPoint(x: bounds.midX + barShift2, y: bounds.height - 10)
+            let barShift1 = bounds.width * 0.13 * CGFloat(sin(t * 0.48))
+            let barShift2 = bounds.width * 0.15 * CGFloat(cos(t * 0.56 + 1.1))
+            bottomEdgeGlowPrimary.position = CGPoint(x: bounds.midX + barShift1, y: bounds.height - 14)
+            bottomEdgeGlowSecondary.position = CGPoint(x: bounds.midX + barShift2, y: bounds.height - 10)
 
-        let c1 = LuminousPalette.gradientColors(phase: t * 0.50, alpha: 0.40)
-        let c1Mid = LuminousPalette.gradientColors(phase: t * 0.50 + 0.9, alpha: 0.17)
-        bottomEdgeGlowPrimary.colors = [c1[0], c1Mid[1], c1[2].copy(alpha: 0.05) ?? NSColor.clear.cgColor, NSColor.clear.cgColor]
+            let c1 = LuminousPalette.gradientColors(phase: t * 0.50, alpha: 0.40)
+            let c1Mid = LuminousPalette.gradientColors(phase: t * 0.50 + 0.9, alpha: 0.17)
+            bottomEdgeGlowPrimary.colors = [c1[0], c1Mid[1], c1[2].copy(alpha: 0.05) ?? NSColor.clear.cgColor, NSColor.clear.cgColor]
 
-        let c2 = LuminousPalette.gradientColors(phase: t * 0.65 + 2.1, alpha: 0.44)
-        let c2Mid = LuminousPalette.gradientColors(phase: t * 0.65 + 3.0, alpha: 0.16)
-        bottomEdgeGlowSecondary.colors = [c2[0], c2Mid[1], NSColor.clear.cgColor]
+            let c2 = LuminousPalette.gradientColors(phase: t * 0.65 + 2.1, alpha: 0.44)
+            let c2Mid = LuminousPalette.gradientColors(phase: t * 0.65 + 3.0, alpha: 0.16)
+            bottomEdgeGlowSecondary.colors = [c2[0], c2Mid[1], NSColor.clear.cgColor]
 
-        // 3. Smoothly twinkling 4-point little stars
-        for star in twinkleStars {
-            let wave = max(0.0, sin(t * star.speed + star.phase))
-            let glow = pow(wave, 2.3)
-            star.layer.opacity = Float(glow * star.maxAlpha)
-            let s = CGFloat(0.55 + 0.58 * glow)
-            let rot = CGFloat(t * star.spinSpeed)
-            let xf = CATransform3DMakeRotation(rot, 0, 0, 1)
-            star.layer.transform = CATransform3DScale(xf, s, s, 1)
-            let driftY = CGFloat(sin(t * 0.7 + star.phase)) * 6.0
-            star.layer.position = CGPoint(x: star.base.x, y: star.base.y - driftY)
+            // 3. Smoothly twinkling 4-point little stars
+            if twinkleContainer.opacity > 0.01 {
+                for star in twinkleStars {
+                    let wave = max(0.0, sin(t * star.speed + star.phase))
+                    let glow = pow(wave, 2.3)
+                    star.layer.opacity = Float(glow * star.maxAlpha)
+                    let s = CGFloat(0.55 + 0.58 * glow)
+                    let rot = CGFloat(t * star.spinSpeed)
+                    let xf = CATransform3DMakeRotation(rot, 0, 0, 1)
+                    star.layer.transform = CATransform3DScale(xf, s, s, 1)
+                    let driftY = CGFloat(sin(t * 0.7 + star.phase)) * 6.0
+                    star.layer.position = CGPoint(x: star.base.x, y: star.base.y - driftY)
+                }
+            }
         }
 
         // 4. Selection & active box/circle full-RGB ambient glow
@@ -1007,8 +1024,8 @@ private final class OverlayCanvasView: NSView {
         }
 
         // 6. Bottom prompt capsule & sheet flowing soft border glow + drag inertia physics
-        bottomSearchBar.updatePhysics(dt: dt)
         if bottomSearchBar.alphaValue > 0.02 {
+            bottomSearchBar.updatePhysics(dt: dt)
             bottomSearchBar.updateGlow(time: t)
         }
         resultsSheet?.updatePhysics(dt: dt)
@@ -2409,14 +2426,25 @@ private final class OverlayCanvasView: NSView {
         let afterAction = AppSettings.shared.afterSelectionAction
         let shouldAutoCopyOnly = optionHeldOnRelease || afterAction == .copyText
         let shouldAutoSearch = !shouldAutoCopyOnly && afterAction == .search
+        let speculativeLensUpload = !shouldAutoCopyOnly && !isTextMode && (shouldAutoSearch || AppSettings.shared.panelDefaultTab != .answer)
 
         searchTask = Task { [weak self] in
+            // Run Vision OCR/classify and Google Lens image upload concurrently to eliminate multi-second wait
+            let uploadTask: Task<LensUploadResult, Error>? = speculativeLensUpload ? Task {
+                let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
+                return try await GoogleLensService.uploadImage(cropped, existingCookies: cookies)
+            } : nil
+
             let analysis = await VisionAnalyzer.analyze(image: cropped)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                uploadTask?.cancel()
+                return
+            }
             CaptureHistoryStore.shared.updateLatestText(analysis.cleanPreviewText, dominantHex: analysis.dominantHexColor)
             self?.resultsSheet?.updateVisionAnalysis(analysis)
 
             if shouldAutoCopyOnly {
+                uploadTask?.cancel()
                 if !analysis.text.isEmpty {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(analysis.text, forType: .string)
@@ -2438,11 +2466,12 @@ private final class OverlayCanvasView: NSView {
             }
 
             if analysis.isLowInformation {
+                uploadTask?.cancel()
                 self?.stopBracketPulse()
                 return
             }
 
-            // Switch panel tab for Auto mode before uploading
+            // Switch panel tab for Auto mode before loading results
             if let sheet = self?.resultsSheet {
                 let targetIdx: Int
                 switch AppSettings.shared.panelDefaultTab {
@@ -2455,13 +2484,19 @@ private final class OverlayCanvasView: NSView {
 
             let needsLensNow = shouldAutoSearch || AppSettings.shared.panelDefaultTab == .lens || (AppSettings.shared.panelDefaultTab == .auto && !analysis.isMostlyText)
             guard needsLensNow else {
+                uploadTask?.cancel()
                 self?.stopBracketPulse()
                 return
             }
 
-            let existingCookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
             do {
-                let upload = try await GoogleLensService.uploadImage(cropped, existingCookies: existingCookies)
+                let upload: LensUploadResult
+                if let uploadTask {
+                    upload = try await uploadTask.value
+                } else {
+                    let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
+                    upload = try await GoogleLensService.uploadImage(cropped, existingCookies: cookies)
+                }
                 guard !Task.isCancelled else { return }
                 self?.resultsSheet?.markLensUploadStarted()
                 self?.resultsSheet?.loadLensResults(upload)
@@ -2475,6 +2510,7 @@ private final class OverlayCanvasView: NSView {
     private func dismissResultsSheet() {
         guard let oldSheet = resultsSheet else { return }
         resultsSheet = nil
+        oldSheet.prepareForClose()
         updateSelectionMask(forSheetFrame: nil)
         oldSheet.wantsLayer = true
         let outDuration = AppleMotion.duration(0.20)
@@ -3391,6 +3427,8 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         aiStreamingTask?.cancel()
         stopLoaderAnimations()
         webView?.stopLoading()
+        webView?.navigationDelegate = nil
+        webView?.uiDelegate = nil
         webView?.loadHTMLString("", baseURL: nil)
     }
 
@@ -5089,6 +5127,12 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        let nsErr = error as NSError
+        if nsErr.code == NSURLErrorCancelled { return }
+        showLensError(error.localizedDescription)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         let nsErr = error as NSError
         if nsErr.code == NSURLErrorCancelled { return }
         showLensError(error.localizedDescription)
