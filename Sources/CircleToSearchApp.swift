@@ -85,6 +85,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hotkeyManager = HotkeyManager { [weak self] in
             self?.triggerCircleToSearch()
         }
+        let s = AppSettings.shared
+        if s.useCustomHotkey {
+            hotkeyManager.applyCustomHotkey(keyCode: s.customKeyCode, carbonModifiers: s.customCarbonModifiers)
+        } else {
+            hotkeyManager.preset = s.hotkeyPreset
+        }
         rebuildMenu()
 
         settingsObserver = NotificationCenter.default.addObserver(
@@ -144,15 +150,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         Task { @MainActor [weak self] in
-            let wasSignedIn = FirebaseAuthService.shared.isSignedIn
             await FirebaseAuthService.shared.restoreAndSyncOnLaunch()
             self?.rebuildMenu()
-            if wasSignedIn && !FirebaseAuthService.shared.isSignedIn {
-                self?.toastController.show(message: "Session expired — please sign in with Google", duration: 3.0)
-                OnboardingWindowController.shared.show { [weak self] in
-                    self?.triggerCircleToSearch()
-                }
-            }
         }
 
         if !AppSettings.shared.hasCompletedOnboarding {
@@ -314,8 +313,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(accountRoot)
         } else {
             let signInItem = NSMenuItem(
-                title: "Sign In with Google… (Required)",
-                action: #selector(openSignInGate),
+                title: "Sign In with Google (Optional)…",
+                action: #selector(switchGoogleAccount),
                 keyEquivalent: ""
             )
             signInItem.target = self
@@ -537,9 +536,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         FirebaseAuthService.shared.signOut()
         rebuildMenu()
         toastController.show(message: "Signed out of Google Account")
-        OnboardingWindowController.shared.show { [weak self] in
-            self?.triggerCircleToSearch()
-        }
     }
 
     @objc private func selectHotkeyPreset(_ sender: NSMenuItem) {

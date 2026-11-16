@@ -78,6 +78,7 @@ final class HotkeyManager {
     nonisolated(unsafe) private var globalFlagsMonitor: Any?
     nonisolated(unsafe) private var localFlagsMonitor: Any?
     nonisolated(unsafe) private var globalKeyMonitor: Any?
+    nonisolated(unsafe) private var localKeyMonitor: Any?
 
     private let onTrigger: () -> Void
     private var lastTriggerTime: Date = .distantPast
@@ -98,7 +99,7 @@ final class HotkeyManager {
         self.onTrigger = onTrigger
 
         let savedPreset = UserDefaults.standard.string(forKey: "hotkeyPreset")
-            .flatMap(HotkeyPreset.init(rawValue:)) ?? .cmdShiftSpace
+            .flatMap(HotkeyPreset.init(rawValue:)) ?? .doubleTapCmd
         self.preset = savedPreset
 
         installCarbonHandler()
@@ -112,6 +113,7 @@ final class HotkeyManager {
         if let globalFlagsMonitor { NSEvent.removeMonitor(globalFlagsMonitor) }
         if let localFlagsMonitor { NSEvent.removeMonitor(localFlagsMonitor) }
         if let globalKeyMonitor { NSEvent.removeMonitor(globalKeyMonitor) }
+        if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
     }
 
     private func fireTrigger() {
@@ -138,24 +140,31 @@ final class HotkeyManager {
                 self?.modifierWasCleanTap = false
             }
         }
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.modifierWasCleanTap = false
+            }
+            return event
+        }
     }
 
     private func handleFlagsChanged(_ event: NSEvent) {
         guard preset.isModifierDoubleTap else { return }
         let targetFlag: NSEvent.ModifierFlags = (preset == .doubleTapCmd) ? .command : .option
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let relevantModifiers: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+        let flags = event.modifierFlags.intersection(relevantModifiers)
         let now = ProcessInfo.processInfo.systemUptime
 
         if flags == targetFlag {
             modifierDownTimestamp = now
             modifierWasCleanTap = true
         } else if flags.isEmpty {
-            guard modifierWasCleanTap, (now - modifierDownTimestamp) < 0.28 else {
+            guard modifierWasCleanTap, (now - modifierDownTimestamp) < 0.35 else {
                 modifierWasCleanTap = false
                 return
             }
             modifierWasCleanTap = false
-            if (now - lastModifierReleaseTime) < 0.36 {
+            if (now - lastModifierReleaseTime) < 0.45 {
                 lastModifierReleaseTime = 0
                 fireTrigger()
             } else {
