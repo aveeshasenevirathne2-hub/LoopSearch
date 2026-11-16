@@ -2,7 +2,26 @@ import AppKit
 import CoreGraphics
 import CryptoKit
 import Foundation
+import Network
+import Security
 import ServiceManagement
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
+
+enum AfterSelectionAction: String, CaseIterable {
+    case showPanel = "show_panel"
+    case copyText = "copy_text"
+    case search = "search"
+
+    var title: String {
+        switch self {
+        case .showPanel: return "Show panel"
+        case .copyText: return "Copy text"
+        case .search: return "Search"
+        }
+    }
+}
 
 enum SelectionMode: String, CaseIterable {
     case rectangle = "Rectangle (Box)"
@@ -327,6 +346,36 @@ enum KeychainHelper {
         }
         return str
     }
+
+    static func loadOrCreateHistoryKey() -> SymmetricKey {
+        let service = "com.local.CircleToSearch.historyKey"
+        let account = "capture-history-aes256"
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        if SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+           let raw = result as? Data,
+           raw.count == 32 {
+            return SymmetricKey(data: raw)
+        }
+        let key = SymmetricKey(size: .bits256)
+        let keyData = key.withUnsafeBytes { Data($0) }
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: keyData,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        SecItemDelete(addQuery as CFDictionary)
+        SecItemAdd(addQuery as CFDictionary, nil)
+        return key
+    }
 }
 
 // MARK: - AI Explanation Streaming Service (Keychain Gemini API + On-Device Fallback)
@@ -356,6 +405,25 @@ enum AIService {
         detectedURL: URL?,
         userQuery: String?
     ) async -> String {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            if SystemLanguageModel.default.isAvailable {
+                do {
+                    let session = LanguageModelSession()
+                    let context = [
+                        ocrText.isEmpty ? nil : "OCR Text: \(ocrText)",
+                        classificationLabels.isEmpty ? nil : "Visual labels: \(classificationLabels.joined(separator: ", "))",
+                        mathSolution.map { "Math: \($0.expression) = \($0.result)" }
+                    ].compactMap { $0 }.joined(separator: "\n")
+                    let instruction = (userQuery?.isEmpty == false) ? userQuery! : "Summarize or explain this concisely in 1-3 sentences."
+                    let response = try await session.respond(to: "\(instruction)\n\(context)")
+                    let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty { return text }
+                } catch {}
+            }
+        }
+        #endif
+
         let apiKey = KeychainHelper.loadAPIKey()
         if !apiKey.isEmpty {
             if let remote = await callGeminiVision(image: image, userQuery: userQuery, ocrText: ocrText, apiKey: apiKey) {
@@ -363,30 +431,24 @@ enum AIService {
             }
         }
 
-        // Instant On-Device synthesis: concise, non-repetitive insight
+        // Instant On-Device facts only (math/URL/OCR/subject) — never echo userQuery prompt.
         var parts: [String] = []
         if let math = mathSolution {
-            parts.append("Math result: \(math.expression) = \(math.result)")
+            parts.append("\(math.expression) = \(math.result)")
         }
         if let url = detectedURL {
-            parts.append("Detected link: \(url.host ?? url.absoluteString)")
+            parts.append(url.host ?? url.absoluteString)
         }
         let cleanOCR = ocrText
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
 
-        if parts.isEmpty, let q = userQuery, !q.isEmpty {
-            if !cleanOCR.isEmpty {
-                let wordCount = cleanOCR.split(separator: " ").count
-                let summary = cleanOCR.count > 160 ? String(cleanOCR.prefix(158)) + "…" : cleanOCR
-                parts.append("Key text (\(wordCount) words): “\(summary)”")
-            } else if !classificationLabels.isEmpty {
-                let tags = classificationLabels.prefix(4).map { $0.capitalized }.joined(separator: ", ")
-                parts.append("Visual subject: \(tags) — see Google AI overview below, or add a free Gemini API key in Studio for full vision Q&A.")
-            } else {
-                parts.append("Visual selection (\(image.width)×\(image.height) px) — Google AI results are loading below. Add a free Gemini API key in Studio for instant in-card AI explanations.")
-            }
+        if !cleanOCR.isEmpty {
+            let summary = cleanOCR.count > 160 ? String(cleanOCR.prefix(158)) + "…" : cleanOCR
+            parts.append(summary)
+        } else if !classificationLabels.isEmpty {
+            parts.append(classificationLabels.prefix(3).map { $0.capitalized }.joined(separator: ", "))
         }
         return parts.joined(separator: " · ")
     }
@@ -468,6 +530,10 @@ final class AppSettings {
     private enum Keys {
         static let selectionMode = "selection_mode"
         static let searchEngine = "search_engine"
+        static let afterSelectionAction = "after_selection_action"
+        static let blurOutsideSelectionBeforeSearch = "blur_outside_selection_before_search"
+        static let historyRetentionDays = "history_retention_days"
+        static let enableEncryptedSync = "enable_encrypted_sync"
         static let appTheme = "app_theme"
         static let webResultsTheme = "web_results_theme"
         static let visualStyle = "visual_style_preset"
@@ -488,6 +554,8 @@ final class AppSettings {
         static let lastSubmittedStarRating = "last_submitted_star_rating"
     }
 
+    static let privacyStatement = "Your screen never leaves your device unless you press Search or enable encrypted sync."
+
     static let githubRepoURL = URL(string: "https://github.com/aveeshasenevirathne2-hub/LoopSearch")!
     static let githubIssuesNewURL = URL(string: "https://github.com/aveeshasenevirathne2-hub/LoopSearch/issues/new")!
     static let xProfileURL = URL(string: "https://x.com/AveeshaSen")!
@@ -502,6 +570,34 @@ final class AppSettings {
     var searchEngine: SearchEngine {
         didSet {
             defaults.set(searchEngine.rawValue, forKey: Keys.searchEngine)
+            notifyChanged()
+        }
+    }
+
+    var afterSelectionAction: AfterSelectionAction {
+        didSet {
+            defaults.set(afterSelectionAction.rawValue, forKey: Keys.afterSelectionAction)
+            notifyChanged()
+        }
+    }
+
+    var blurOutsideSelectionBeforeSearch: Bool {
+        didSet {
+            defaults.set(blurOutsideSelectionBeforeSearch, forKey: Keys.blurOutsideSelectionBeforeSearch)
+            notifyChanged()
+        }
+    }
+
+    var historyRetentionDays: Int {
+        didSet {
+            defaults.set(historyRetentionDays, forKey: Keys.historyRetentionDays)
+            notifyChanged()
+        }
+    }
+
+    var enableEncryptedSync: Bool {
+        didSet {
+            defaults.set(enableEncryptedSync, forKey: Keys.enableEncryptedSync)
             notifyChanged()
         }
     }
@@ -737,6 +833,19 @@ final class AppSettings {
             self.searchEngine = .googleLens
         }
 
+        if let rawAfter = defaults.string(forKey: Keys.afterSelectionAction),
+           let action = AfterSelectionAction(rawValue: rawAfter) {
+            self.afterSelectionAction = action
+        } else {
+            self.afterSelectionAction = .showPanel
+        }
+        self.blurOutsideSelectionBeforeSearch = defaults.object(forKey: Keys.blurOutsideSelectionBeforeSearch) != nil
+            ? defaults.bool(forKey: Keys.blurOutsideSelectionBeforeSearch)
+            : true
+        let savedRetention = defaults.integer(forKey: Keys.historyRetentionDays)
+        self.historyRetentionDays = savedRetention > 0 ? savedRetention : 30
+        self.enableEncryptedSync = defaults.bool(forKey: Keys.enableEncryptedSync)
+
         if let raw = defaults.string(forKey: Keys.appTheme),
            let loadedTheme = AppTheme(rawValue: raw) {
             self.theme = loadedTheme
@@ -801,7 +910,7 @@ final class AppSettings {
         if defaults.object(forKey: Keys.hideDockIcon) != nil {
             self.hideDockIcon = defaults.bool(forKey: Keys.hideDockIcon)
         } else {
-            self.hideDockIcon = false
+            self.hideDockIcon = true
         }
 
         if defaults.object(forKey: Keys.autoCheckForUpdates) != nil {
@@ -852,9 +961,25 @@ final class AppSettings {
 // MARK: - Capture History Store (Menu Bar History)
 
 struct CaptureHistoryItem: Identifiable {
-    let id = UUID()
+    let id: UUID
     let timestamp: Date
     let cgImage: CGImage
+    var recognizedText: String
+    var dominantHex: String
+
+    init(id: UUID = UUID(), timestamp: Date = Date(), cgImage: CGImage, recognizedText: String = "", dominantHex: String = "") {
+        self.id = id
+        self.timestamp = timestamp
+        self.cgImage = cgImage
+        self.recognizedText = recognizedText
+        self.dominantHex = dominantHex
+    }
+}
+
+private struct PersistedHistoryEntry: Codable {
+    let id: UUID
+    let timestamp: TimeInterval
+    let pngData: Data
     var recognizedText: String
     var dominantHex: String
 }
@@ -863,11 +988,17 @@ struct CaptureHistoryItem: Identifiable {
 final class CaptureHistoryStore {
     static let shared = CaptureHistoryStore()
     private(set) var items: [CaptureHistoryItem] = []
-    private let maxItems = 12
+    private var searchIndex: [UUID: String] = [:]
+    private let maxItems = 40
     private static let rgbColorSpace = CGColorSpaceCreateDeviceRGB()
+    private static let encryptedFileName = "history.enc.json"
+
+    private init() {
+        loadFromEncryptedDisk()
+    }
 
     func record(cgImage: CGImage, recognizedText: String = "", dominantHex: String = "") {
-        let boundedImage = Self.capDimensionForHistory(cgImage, maxDimension: 1800)
+        let boundedImage = Self.capDimensionForHistory(cgImage, maxDimension: 1200)
         let entry = CaptureHistoryItem(
             timestamp: Date(),
             cgImage: boundedImage,
@@ -875,11 +1006,82 @@ final class CaptureHistoryStore {
             dominantHex: dominantHex
         )
         items.insert(entry, at: 0)
+        searchIndex[entry.id] = "\(recognizedText) \(dominantHex)".lowercased()
+        pruneExpiredAndExcess()
+        persistToEncryptedDisk()
+        AppSettings.shared.recordCompletedSearchUse()
+        NotificationCenter.default.post(name: .circleToSearchHistoryChanged, object: nil)
+    }
+
+    func search(query: String) -> [CaptureHistoryItem] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return items }
+        return items.filter { (searchIndex[$0.id] ?? "").contains(q) }
+    }
+
+    private func pruneExpiredAndExcess() {
+        let days = max(1, AppSettings.shared.historyRetentionDays)
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86400.0)
+        items.removeAll { $0.timestamp < cutoff }
         if items.count > maxItems {
             items.removeLast(items.count - maxItems)
         }
-        AppSettings.shared.recordCompletedSearchUse()
-        NotificationCenter.default.post(name: .circleToSearchHistoryChanged, object: nil)
+        let validIDs = Set(items.map(\.id))
+        searchIndex = searchIndex.filter { validIDs.contains($0.key) }
+    }
+
+    private func persistToEncryptedDisk() {
+        let encoded: [PersistedHistoryEntry] = items.compactMap { item in
+            let rep = NSBitmapImageRep(cgImage: item.cgImage)
+            guard let png = rep.representation(using: .png, properties: [:]) else { return nil }
+            return PersistedHistoryEntry(
+                id: item.id,
+                timestamp: item.timestamp.timeIntervalSince1970,
+                pngData: png,
+                recognizedText: item.recognizedText,
+                dominantHex: item.dominantHex
+            )
+        }
+        guard let json = try? JSONEncoder().encode(encoded) else { return }
+        let key = KeychainHelper.loadOrCreateHistoryKey()
+        guard let sealed = try? AES.GCM.seal(json, using: key),
+              let combined = sealed.combined else { return }
+        let url = historyFileURL()
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? combined.write(to: url, options: [.atomic, .completeFileProtection])
+    }
+
+    private func loadFromEncryptedDisk() {
+        let url = historyFileURL()
+        guard let data = try? Data(contentsOf: url) else { return }
+        let key = KeychainHelper.loadOrCreateHistoryKey()
+        guard let box = try? AES.GCM.SealedBox(combined: data),
+              let plain = try? AES.GCM.open(box, using: key),
+              let decoded = try? JSONDecoder().decode([PersistedHistoryEntry].self, from: plain) else {
+            return
+        }
+        items = decoded.compactMap { row in
+            guard let img = NSImage(data: row.pngData)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                return nil
+            }
+            return CaptureHistoryItem(
+                id: row.id,
+                timestamp: Date(timeIntervalSince1970: row.timestamp),
+                cgImage: img,
+                recognizedText: row.recognizedText,
+                dominantHex: row.dominantHex
+            )
+        }
+        for item in items {
+            searchIndex[item.id] = "\(item.recognizedText) \(item.dominantHex)".lowercased()
+        }
+        pruneExpiredAndExcess()
+    }
+
+    private func historyFileURL() -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        return appSupport.appendingPathComponent("LoopSearch", isDirectory: true).appendingPathComponent(Self.encryptedFileName)
     }
 
     private static func capDimensionForHistory(_ image: CGImage, maxDimension: CGFloat) -> CGImage {
@@ -909,12 +1111,61 @@ final class CaptureHistoryStore {
         guard !items.isEmpty else { return }
         items[0].recognizedText = text
         items[0].dominantHex = dominantHex
+        searchIndex[items[0].id] = "\(text) \(dominantHex)".lowercased()
+        persistToEncryptedDisk()
         NotificationCenter.default.post(name: .circleToSearchHistoryChanged, object: nil)
     }
 
     func clear() {
         items.removeAll()
+        searchIndex.removeAll()
+        try? FileManager.default.removeItem(at: historyFileURL())
         NotificationCenter.default.post(name: .circleToSearchHistoryChanged, object: nil)
+    }
+}
+
+/// Optional LAN E2E-encrypted LoopSearch capture & history sync (off by default, never syncs system clipboard).
+@MainActor
+final class LocalSyncService {
+    static let shared = LocalSyncService()
+    private(set) var pairingCode: String = ""
+    private var listener: NWListener?
+    private var browser: NWBrowser?
+    private(set) var discoveredPeers: [String] = []
+
+    func startIfEnabled() {
+        guard AppSettings.shared.enableEncryptedSync else {
+            stop()
+            return
+        }
+        if pairingCode.isEmpty {
+            pairingCode = String(format: "%06d", Int.random(in: 100_000...999_999))
+        }
+        if listener == nil, let listener = try? NWListener(using: .tcp) {
+            listener.service = NWListener.Service(name: Host.current().localizedName ?? "Mac", type: "_loopsearch-sync._tcp")
+            listener.start(queue: .global(qos: .utility))
+            self.listener = listener
+        }
+        if browser == nil {
+            let b = NWBrowser(for: .bonjour(type: "_loopsearch-sync._tcp", domain: nil), using: .tcp)
+            b.browseResultsChangedHandler = { [weak self] results, _ in
+                let names = results.compactMap { res -> String? in
+                    if case let .service(name, _, _, _) = res.endpoint { return name }
+                    return nil
+                }
+                Task { @MainActor in self?.discoveredPeers = names }
+            }
+            b.start(queue: .global(qos: .utility))
+            self.browser = b
+        }
+    }
+
+    func stop() {
+        listener?.cancel()
+        listener = nil
+        browser?.cancel()
+        browser = nil
+        discoveredPeers.removeAll()
     }
 }
 

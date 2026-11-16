@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import CoreImage
 import Foundation
+import NaturalLanguage
 import Vision
 
 struct RecognizedTextBlock: Sendable {
@@ -16,6 +17,12 @@ struct VisionAnalysisResult: Sendable {
     let blocks: [RecognizedTextBlock]
     let urls: [URL]
     let barcodes: [String]
+    let emails: [String]
+    let phoneNumbers: [String]
+    let dates: [Date]
+    let isSystemLanguage: Bool
+    let tableTSV: String?
+    let tableCSV: String?
     let dominantHexColor: String
     let dominantRGB: (r: CGFloat, g: CGFloat, b: CGFloat)
     let hasVibrantColorSwatch: Bool
@@ -35,6 +42,9 @@ enum VisionAnalyzer {
         .cacheIntermediates: false
     ])
     private static let linkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+    private static let smartDataDetector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.phoneNumber.rawValue | NSTextCheckingResult.CheckingType.date.rawValue
+    )
     private static let mathExpressionRegex = try? NSRegularExpression(
         pattern: #"(?:^|\s)(\(?-?\d+(?:\.\d+)?\)?(?:\s*[\+\-\*\/]\s*\(?-?\d+(?:\.\d+)?\)?)+)"#
     )
@@ -42,6 +52,7 @@ enum VisionAnalyzer {
     static func analyze(image: CGImage) async -> VisionAnalysisResult {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
+                let ocrImage = upscaleSmallCropIfNeeded(image)
                 let textRequest = VNRecognizeTextRequest()
                 textRequest.recognitionLevel = .accurate
                 textRequest.usesLanguageCorrection = true
@@ -49,26 +60,35 @@ enum VisionAnalyzer {
                 let barcodeRequest = VNDetectBarcodesRequest()
                 let classifyRequest = VNClassifyImageRequest()
 
-                let handler = VNImageRequestHandler(cgImage: image, options: [:])
-                try? handler.perform([textRequest, barcodeRequest, classifyRequest])
+                let ocrHandler = VNImageRequestHandler(cgImage: ocrImage, options: [:])
+                try? ocrHandler.perform([textRequest])
 
-                var blocks: [RecognizedTextBlock] = []
-                var lines: [String] = []
+                let imageHandler = VNImageRequestHandler(cgImage: image, options: [:])
+                try? imageHandler.perform([barcodeRequest, classifyRequest])
+
+                var rawBlocks: [RecognizedTextBlock] = []
                 for obs in textRequest.results ?? [] {
-                    guard let top = obs.topCandidates(1).first else { continue }
+                    guard let top = obs.topCandidates(1).first, top.confidence >= 0.35 else { continue }
                     let str = top.string.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !str.isEmpty else { continue }
-                    lines.append(str)
                     let box = obs.boundingBox
-                    // Convert Vision bottom-left normalized rect to top-left normalized rect
                     let topLeftRect = CGRect(
                         x: box.origin.x,
                         y: 1.0 - box.origin.y - box.height,
                         width: box.width,
                         height: box.height
                     )
-                    blocks.append(RecognizedTextBlock(text: str, normalizedTopLeftRect: topLeftRect))
+                    rawBlocks.append(RecognizedTextBlock(text: str, normalizedTopLeftRect: topLeftRect))
                 }
+
+                // Sort reading order: top-to-bottom rows (banded by ~2% height), then left-to-right
+                let blocks = rawBlocks.sorted { a, b in
+                    if abs(a.normalizedTopLeftRect.minY - b.normalizedTopLeftRect.minY) > 0.018 {
+                        return a.normalizedTopLeftRect.minY < b.normalizedTopLeftRect.minY
+                    }
+                    return a.normalizedTopLeftRect.minX < b.normalizedTopLeftRect.minX
+                }
+                let lines = blocks.map(\.text)
 
                 let fullText = lines.joined(separator: "\n")
                 let cleanPreview = makeCleanPreviewSnippet(from: lines)
@@ -82,17 +102,41 @@ enum VisionAnalyzer {
                     .map { $0.identifier.replacingOccurrences(of: "_", with: " ") }
 
                 var urls: [URL] = []
+                var emails: [String] = []
                 let combinedForURLs = ([fullText] + barcodes).joined(separator: "\n")
                 if let detector = linkDetector {
                     let nsString = combinedForURLs as NSString
                     let matches = detector.matches(in: combinedForURLs, range: NSRange(location: 0, length: nsString.length))
                     for match in matches {
-                        if let url = match.url, !urls.contains(url) {
-                            urls.append(url)
+                        if let url = match.url {
+                            if url.scheme?.lowercased() == "mailto" {
+                                let addr = url.absoluteString.replacingOccurrences(of: "mailto:", with: "")
+                                if !addr.isEmpty && !emails.contains(addr) {
+                                    emails.append(addr)
+                                }
+                            } else if !urls.contains(url) {
+                                urls.append(url)
+                            }
                         }
                     }
                 }
 
+                var phones: [String] = []
+                var dates: [Date] = []
+                if !fullText.isEmpty, let dataDetector = smartDataDetector {
+                    let nsText = fullText as NSString
+                    let matches = dataDetector.matches(in: fullText, range: NSRange(location: 0, length: nsText.length))
+                    for match in matches {
+                        if match.resultType == .phoneNumber, let p = match.phoneNumber, !phones.contains(p) {
+                            phones.append(p)
+                        } else if match.resultType == .date, let d = match.date {
+                            dates.append(d)
+                        }
+                    }
+                }
+
+                let isSystemLang = detectIsSystemLanguage(fullText)
+                let (tsv, csv) = extractTableIfPresent(from: blocks)
                 let colorInfo = sampleDominantColorAndDetail(from: image)
                 let math = evaluateMathIfPresent(in: fullText)
 
@@ -106,15 +150,80 @@ enum VisionAnalyzer {
                     blocks: blocks,
                     urls: urls,
                     barcodes: barcodes,
+                    emails: emails,
+                    phoneNumbers: phones,
+                    dates: dates,
+                    isSystemLanguage: isSystemLang,
+                    tableTSV: tsv,
+                    tableCSV: csv,
                     dominantHexColor: colorInfo.hex,
                     dominantRGB: colorInfo.rgb,
-                    hasVibrantColorSwatch: colorInfo.isVibrantSwatch && !isLowInfo,
+                    hasVibrantColorSwatch: colorInfo.isVibrantSwatch && !isLowInfo && fullText.count < 4,
                     isLowInformation: isLowInfo,
                     classificationLabels: labels,
                     mathSolution: math
                 ))
             }
         }
+    }
+
+    /// Upscales small crops (< 600px) 2x–3x before Vision OCR for crisp small-text accuracy.
+    private static func upscaleSmallCropIfNeeded(_ image: CGImage) -> CGImage {
+        let minDim = min(image.width, image.height)
+        guard minDim > 0, minDim < 600 else { return image }
+        let factor = minDim < 220 ? 3 : 2
+        let targetW = min(2400, image.width * factor)
+        let targetH = min(2400, image.height * factor)
+        guard let ctx = CGContext(
+            data: nil,
+            width: targetW,
+            height: targetH,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: rgbColorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return image
+        }
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: targetW, height: targetH))
+        return ctx.makeImage() ?? image
+    }
+
+    private static func detectIsSystemLanguage(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 6 else { return true }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(trimmed)
+        guard let dominant = recognizer.dominantLanguage else { return true }
+        let systemLang = Locale.current.language.languageCode?.identifier ?? "en"
+        return dominant.rawValue.lowercased().hasPrefix(systemLang.lowercased())
+    }
+
+    private static func extractTableIfPresent(from blocks: [RecognizedTextBlock]) -> (tsv: String?, csv: String?) {
+        guard blocks.count >= 6 else { return (nil, nil) }
+        var rows: [[RecognizedTextBlock]] = []
+        for b in blocks {
+            if let lastRow = rows.last,
+               let first = lastRow.first,
+               abs(first.normalizedTopLeftRect.midY - b.normalizedTopLeftRect.midY) < 0.022 {
+                rows[rows.count - 1].append(b)
+            } else {
+                rows.append([b])
+            }
+        }
+        let multiColRows = rows.filter { $0.count >= 2 }
+        guard multiColRows.count >= 3 else { return (nil, nil) }
+
+        let sortedRows = rows.map { $0.sorted { $0.normalizedTopLeftRect.minX < $1.normalizedTopLeftRect.minX } }
+        let tsv = sortedRows.map { row in row.map(\.text).joined(separator: "\t") }.joined(separator: "\n")
+        let csv = sortedRows.map { row in
+            row.map { cell in
+                let escaped = cell.text.replacingOccurrences(of: "\"", with: "\"\"")
+                return (escaped.contains(",") || escaped.contains("\"")) ? "\"\(escaped)\"" : escaped
+            }.joined(separator: ",")
+        }.joined(separator: "\n")
+        return (tsv, csv)
     }
 
     /// Masks a cropped rectangular CGImage to the user's freehand lasso CGPath (in canvas coordinates).
@@ -221,7 +330,6 @@ enum VisionAnalyzer {
         var bestR: CGFloat = 0
         var bestG: CGFloat = 0
         var bestB: CGFloat = 0
-        var bestSat: CGFloat = 0
         var avgR: CGFloat = 0
         var avgG: CGFloat = 0
         var avgB: CGFloat = 0
@@ -279,7 +387,6 @@ enum VisionAnalyzer {
                     bestR = r
                     bestG = g
                     bestB = b
-                    bestSat = sat
                 }
             }
         }

@@ -653,6 +653,46 @@ private final class SettingsContentView: NSView {
             to: mainStack
         )
 
+        let afterOptions = AfterSelectionAction.allCases.map {
+            LiquidGlassSegmentedControl.Option(title: $0.title, symbol: nil)
+        }
+        let afterSegment = LiquidGlassSegmentedControl(
+            options: afterOptions,
+            selectedIndex: AfterSelectionAction.allCases.firstIndex(of: settings.afterSelectionAction) ?? 0,
+            height: 28,
+            compact: true
+        ) { idx in
+            guard AfterSelectionAction.allCases.indices.contains(idx) else { return }
+            AppSettings.shared.afterSelectionAction = AfterSelectionAction.allCases[idx]
+        }
+        addRow(
+            title: "After Selection",
+            subtitle: "Hold ⌥ Option on release anytime for quick Copy Text",
+            control: afterSegment,
+            to: mainStack
+        )
+
+        let blurToggle = LiquidGlassToggle(isOn: settings.blurOutsideSelectionBeforeSearch) { isOn in
+            AppSettings.shared.blurOutsideSelectionBeforeSearch = isOn
+        }
+        addRow(
+            title: "Blur Surroundings Before Search",
+            subtitle: "Offer to blur everything outside your selection before uploading",
+            control: blurToggle,
+            to: mainStack
+        )
+
+        let syncToggle = LiquidGlassToggle(isOn: settings.enableEncryptedSync) { isOn in
+            AppSettings.shared.enableEncryptedSync = isOn
+            LocalSyncService.shared.startIfEnabled()
+        }
+        addRow(
+            title: "Encrypted LAN Sync (Off by default)",
+            subtitle: AppSettings.privacyStatement,
+            control: syncToggle,
+            to: mainStack
+        )
+
         // SECTION 2: APPEARANCE & COMFORT
         addSectionHeader("APPEARANCE & COMFORT", to: mainStack)
 

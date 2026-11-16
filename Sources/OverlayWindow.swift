@@ -2405,11 +2405,31 @@ private final class OverlayCanvasView: NSView {
         }
 
         let isTextMode = currentMode == .textOnly
+        let optionHeldOnRelease = NSEvent.modifierFlags.contains(.option)
+        let afterAction = AppSettings.shared.afterSelectionAction
+        let shouldAutoCopyOnly = optionHeldOnRelease || afterAction == .copyText
+        let shouldAutoSearch = !shouldAutoCopyOnly && afterAction == .search
+
         searchTask = Task { [weak self] in
             let analysis = await VisionAnalyzer.analyze(image: cropped)
             guard !Task.isCancelled else { return }
             CaptureHistoryStore.shared.updateLatestText(analysis.cleanPreviewText, dominantHex: analysis.dominantHexColor)
             self?.resultsSheet?.updateVisionAnalysis(analysis)
+
+            if shouldAutoCopyOnly {
+                if !analysis.text.isEmpty {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(analysis.text, forType: .string)
+                    self?.onShowToast(optionHeldOnRelease ? "Copied text (⌥)" : "Copied text")
+                } else {
+                    self?.onShowToast("No text found in selection")
+                }
+                self?.stopBracketPulse()
+                if afterAction == .copyText || optionHeldOnRelease {
+                    self?.onDismiss()
+                }
+                return
+            }
 
             if isTextMode, !analysis.text.isEmpty {
                 NSPasteboard.general.clearContents()
@@ -2418,6 +2438,13 @@ private final class OverlayCanvasView: NSView {
             }
 
             if analysis.isLowInformation {
+                self?.stopBracketPulse()
+                return
+            }
+
+            // Privacy-first: only upload to Google Lens automatically if user chose "After selection: Search"
+            // Otherwise stay on-device in Answer tab until user switches to Lens or clicks Search.
+            guard shouldAutoSearch else {
                 self?.stopBracketPulse()
                 return
             }
@@ -2491,29 +2518,29 @@ private final class OverlayCanvasView: NSView {
         let spaceLeft = rect.minX - usableLeft - gap
 
         var candidates: [(rect: CGRect, score: CGFloat)] = []
-        let sideHeight = min(820, usableHeight * 0.92)
+        let sideHeight = min(620, usableHeight * 0.88)
         let vertWidth = min(760, usableWidth)
 
-        if spaceRight >= 440 {
-            let w = min(720, spaceRight)
+        if spaceRight >= 520 {
+            let w = min(760, spaceRight)
             let rawY = rect.midY - sideHeight / 2
             let y = max(usableTop, min(usableBottom - sideHeight, rawY))
             let x = min(usableRight - w, rect.maxX + gap)
-            let bonus: CGFloat = (w >= 700) ? 1.32 : (w >= 560 ? 1.15 : 0.95)
+            let bonus: CGFloat = (w >= 720) ? 1.35 : 1.12
             candidates.append((CGRect(x: x, y: y, width: w, height: sideHeight), w * sideHeight * bonus))
         }
 
-        if spaceLeft >= 440 {
-            let w = min(720, spaceLeft)
+        if spaceLeft >= 520 {
+            let w = min(760, spaceLeft)
             let rawY = rect.midY - sideHeight / 2
             let y = max(usableTop, min(usableBottom - sideHeight, rawY))
             let x = max(usableLeft, rect.minX - gap - w)
-            let bonus: CGFloat = (w >= 700) ? 1.28 : (w >= 560 ? 1.12 : 0.92)
+            let bonus: CGFloat = (w >= 720) ? 1.30 : 1.08
             candidates.append((CGRect(x: x, y: y, width: w, height: sideHeight), w * sideHeight * bonus))
         }
 
         if spaceBelow >= 360 {
-            let h = min(680, spaceBelow)
+            let h = min(620, spaceBelow)
             let rawX = rect.midX - vertWidth / 2
             let x = max(usableLeft, min(usableRight - vertWidth, rawX))
             let y = min(usableBottom - h, rect.maxY + gap)
@@ -2521,7 +2548,7 @@ private final class OverlayCanvasView: NSView {
         }
 
         if spaceAbove >= 360 {
-            let h = min(660, spaceAbove)
+            let h = min(620, spaceAbove)
             let rawX = rect.midX - vertWidth / 2
             let x = max(usableLeft, min(usableRight - vertWidth, rawX))
             let y = max(usableTop, rect.minY - gap - h)
@@ -2532,11 +2559,10 @@ private final class OverlayCanvasView: NSView {
             return best.rect
         }
 
-        // Only if the selection spans almost the entire viewport, tuck cleanly inside screen edges
-        let w = min(720, usableWidth * 0.90)
-        let h = min(760, usableHeight * 0.88)
-        let x = max(usableLeft, min(usableRight - w, usableRight - w))
-        let y = max(usableTop, min(usableBottom - h, usableBottom - h))
+        let w = min(760, max(520, usableWidth * 0.90))
+        let h = min(620, usableHeight * 0.88)
+        let x = max(usableLeft, usableRight - w)
+        let y = max(usableTop, usableBottom - h)
         return CGRect(x: x, y: y, width: w, height: h)
     }
 
@@ -3225,7 +3251,18 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     private var headerTrackingArea: NSTrackingArea?
 
     private var engineButton: LiquidGlassButton!
+    private var resultsModeSegmented: LiquidGlassSegmentedControl!
     private var backButton: LiquidGlassButton!
+    private var hasTriggeredLensUpload = false
+    private var currentTableTSV: String?
+    private var currentTableCSV: String?
+    private var currentDetectedEmails: [String] = []
+    private var currentDetectedPhones: [String] = []
+    private var currentDetectedDates: [Date] = []
+    private var followUpField: NSTextField!
+    private var addContactChip: LiquidGlassButton!
+    private var addCalendarChip: LiquidGlassButton!
+    private var copyTSVChip: LiquidGlassButton!
     private var webThemeButton: LiquidGlassButton!
     private var moreButton: LiquidGlassButton!
     private var topBarStack: NSView!
@@ -3795,7 +3832,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             guard let self else { return }
             let maxAllowedW = max(920, (self.superview?.bounds.width ?? 1440) - 24)
             let maxAllowedH = max(760, (self.superview?.bounds.height ?? 960) - 48)
-            let newW = max(440, min(maxAllowedW, self.frame.width + delta.width))
+            let newW = max(520, min(maxAllowedW, self.frame.width + delta.width))
             let newH = max(420, min(maxAllowedH, self.frame.height + delta.height))
             let newOriginY = self.frame.maxY - newH
             let allowed = self.allowedOrigins(CGSize(width: newW, height: newH))
@@ -3976,8 +4013,21 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         backButton.isHidden = true
         backButton.setAccessibilityLabel("Back")
 
+        resultsModeSegmented = LiquidGlassSegmentedControl(
+            options: [
+                .init(title: "Answer", symbol: "sparkles"),
+                .init(title: "Lens", symbol: "globe")
+            ],
+            selectedIndex: AppSettings.shared.afterSelectionAction == .search ? 1 : 0,
+            height: 24,
+            compact: true
+        ) { [weak self] idx in
+            self?.handleResultsModeChanged(idx)
+        }
+
         let leftTopGroup = LiquidGlassGroupView(spacing: 5)
         leftTopGroup.stackView.addArrangedSubview(backButton)
+        leftTopGroup.stackView.addArrangedSubview(resultsModeSegmented)
         leftTopGroup.stackView.addArrangedSubview(engineButton)
 
         let pinBtn = makeGlassCircleButton(symbol: "pin.fill", pointSize: 10.0, weight: .medium, tooltip: "Pin to Screen (⌘P)") { [weak self] in
@@ -4214,7 +4264,9 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
         // 3. Single-Row Leading-Aligned Scrollable Action Strip (No dangling centered second row)
         searchActionBtn = makeGlassChip(title: "Search", symbol: "magnifyingglass") { [weak self] in
-            self?.handleSearchText()
+            guard let self else { return }
+            self.resultsModeSegmented?.setSelectedIndex(1, animated: true)
+            self.handleResultsModeChanged(1)
         }
         translateActionBtn = makeGlassChip(title: "Translate", symbol: "character.bubble") { [weak self] in
             self?.handleTranslateText()
@@ -4240,6 +4292,21 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         }
         colorHexChip.isHidden = true
 
+        addContactChip = makeGlassChip(title: "Add to Contacts", symbol: "person.crop.circle.badge.plus") { [weak self] in
+            self?.handleAddToContacts()
+        }
+        addContactChip.isHidden = true
+
+        addCalendarChip = makeGlassChip(title: "Add to Calendar", symbol: "calendar.badge.plus") { [weak self] in
+            self?.handleAddToCalendar()
+        }
+        addCalendarChip.isHidden = true
+
+        copyTSVChip = makeGlassChip(title: "Copy TSV/CSV", symbol: "tablecells") { [weak self] in
+            self?.handleCopyTable()
+        }
+        copyTSVChip.isHidden = true
+
         let overviewJumpBtn = makeGlassChip(title: "Overview", symbol: "doc.text.magnifyingglass") { [weak self] in
             self?.scrollWebResults(toVisualMatches: false)
         }
@@ -4251,6 +4318,9 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             searchActionBtn,
             openLinkChip,
             mathResultChip,
+            addContactChip,
+            addCalendarChip,
+            copyTSVChip,
             translateActionBtn,
             copyTextChip,
             explainActionBtn,
@@ -4334,13 +4404,48 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         aiStack.alignment = .centerY
         aiStack.distribution = .fill
         aiStack.spacing = 8
-        aiStack.translatesAutoresizingMaskIntoConstraints = false
-        aiAnswerCard.contentContainer.addSubview(aiStack)
+
+        followUpField = NSTextField()
+        followUpField.isBezeled = false
+        followUpField.drawsBackground = false
+        followUpField.focusRingType = .none
+        followUpField.font = .systemFont(ofSize: 11.5, weight: .regular)
+        followUpField.textColor = .labelColor
+        followUpField.placeholderString = "Ask a follow-up question…"
+        followUpField.target = self
+        followUpField.action = #selector(handleFollowUpSubmit)
+
+        let followUpContainer = AdaptiveSurfaceView(
+            cornerRadius: 10,
+            darkFill: NSColor.white.withAlphaComponent(0.06),
+            lightFill: NSColor.black.withAlphaComponent(0.04),
+            darkBorder: NSColor.white.withAlphaComponent(0.10),
+            lightBorder: NSColor.black.withAlphaComponent(0.08),
+            borderWidth: 0.75
+        )
+        followUpContainer.translatesAutoresizingMaskIntoConstraints = false
+        followUpField.translatesAutoresizingMaskIntoConstraints = false
+        followUpContainer.addSubview(followUpField)
         NSLayoutConstraint.activate([
-            aiStack.leadingAnchor.constraint(equalTo: aiAnswerCard.contentContainer.leadingAnchor, constant: 10),
-            aiStack.trailingAnchor.constraint(equalTo: aiAnswerCard.contentContainer.trailingAnchor, constant: -8),
-            aiStack.topAnchor.constraint(equalTo: aiAnswerCard.contentContainer.topAnchor, constant: 7),
-            aiStack.bottomAnchor.constraint(equalTo: aiAnswerCard.contentContainer.bottomAnchor, constant: -7)
+            followUpContainer.heightAnchor.constraint(equalToConstant: 28),
+            followUpField.leadingAnchor.constraint(equalTo: followUpContainer.leadingAnchor, constant: 10),
+            followUpField.trailingAnchor.constraint(equalTo: followUpContainer.trailingAnchor, constant: -10),
+            followUpField.centerYAnchor.constraint(equalTo: followUpContainer.centerYAnchor)
+        ])
+
+        let aiCardBodyStack = NSStackView(views: [aiStack, followUpContainer])
+        aiCardBodyStack.orientation = .vertical
+        aiCardBodyStack.alignment = .leading
+        aiCardBodyStack.spacing = 6
+        aiCardBodyStack.translatesAutoresizingMaskIntoConstraints = false
+        aiAnswerCard.contentContainer.addSubview(aiCardBodyStack)
+        NSLayoutConstraint.activate([
+            followUpContainer.widthAnchor.constraint(equalTo: aiCardBodyStack.widthAnchor),
+            aiStack.widthAnchor.constraint(equalTo: aiCardBodyStack.widthAnchor),
+            aiCardBodyStack.leadingAnchor.constraint(equalTo: aiAnswerCard.contentContainer.leadingAnchor, constant: 10),
+            aiCardBodyStack.trailingAnchor.constraint(equalTo: aiAnswerCard.contentContainer.trailingAnchor, constant: -8),
+            aiCardBodyStack.topAnchor.constraint(equalTo: aiAnswerCard.contentContainer.topAnchor, constant: 7),
+            aiCardBodyStack.bottomAnchor.constraint(equalTo: aiAnswerCard.contentContainer.bottomAnchor, constant: -7)
         ])
         rootStack.addArrangedSubview(aiAnswerCard)
         aiAnswerCard.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
@@ -4481,15 +4586,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()
-        let contentController = WKUserContentController()
-        let cleanupUserScript = WKUserScript(
-            source: Self.googleLensCleanUpScript,
-            injectionTime: .atDocumentEnd,
-            forMainFrameOnly: true
-        )
-        contentController.addUserScript(cleanupUserScript)
-        config.userContentController = contentController
-
+        // Never inject custom CSS into Google's page; rely purely on WKWebView.appearance.
         webView = WKWebView(frame: .zero, configuration: config)
         webView.customUserAgent = GoogleLensService.mobileUserAgent
         webView.navigationDelegate = self
@@ -4814,10 +4911,19 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             return
         }
 
+        currentDetectedEmails = result.emails
+        currentDetectedPhones = result.phoneNumbers
+        currentDetectedDates = result.dates
+        currentTableTSV = result.tableTSV
+        currentTableCSV = result.tableCSV
+
         emptySelectionCard.isHidden = true
-        webOuterCard.isHidden = false
+        webOuterCard.isHidden = (resultsModeSegmented?.selectedIndex == 0 && !hasTriggeredLensUpload)
         let hasRecognizedText = !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        translateActionBtn.isHidden = !hasRecognizedText
+        translateActionBtn.isHidden = !hasRecognizedText || result.isSystemLanguage
+        addContactChip.isHidden = result.emails.isEmpty && result.phoneNumbers.isEmpty
+        addCalendarChip.isHidden = result.dates.isEmpty
+        copyTSVChip.isHidden = (result.tableTSV == nil)
         if hasRecognizedText {
             copyTextChip.title = "Copy Text"
             copyTextChip.updateSymbol("text.alignleft", pointSize: 10.5, weight: .medium)
@@ -4876,11 +4982,11 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             snippetRowRef.isHidden = true
         }
 
-        // Only auto-show AI Answer Card when a Gemini API key is configured or a math/smart solution exists
+        // Auto-show Answer Card when Answer tab is selected, or when a Gemini key / math solution exists
         let hasCloudKey = !KeychainHelper.loadAPIKey().isEmpty
-        if hasCloudKey || result.mathSolution != nil {
+        if hasCloudKey || result.mathSolution != nil || resultsModeSegmented?.selectedIndex == 0 {
             startAIExplanationStream(
-                prompt: "Explain this selection concisely in 1 to 2 sentences.",
+                prompt: "Explain this selection concisely in 1 to 3 sentences.",
                 forceShow: true
             )
         } else {
@@ -4981,13 +5087,6 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         syncWebViewAppearance()
-        // Early cleanup injection so duplicate search bars and gaps are stripped before reveal
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
-            guard let self else { return }
-            if let current = self.webView.url, current.host?.contains("google.") == true, !current.path.hasPrefix("/sorry") {
-                self.webView.evaluateJavaScript(Self.googleLensCleanUpScript, completionHandler: nil)
-            }
-        }
     }
 
     private func fadeOutLoadingOverlay() {
@@ -5038,11 +5137,8 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                 }
             } else {
                 AppleMotion.animateVisibility(errorStateCard, visible: false, scale: 0.96, duration: 0.18)
-                if current.host?.contains("google.") == true {
-                    if current.path == "/search" {
-                        baseLensURL = current
-                    }
-                    webView.evaluateJavaScript(Self.googleLensCleanUpScript, completionHandler: nil)
+                if current.host?.contains("google.") == true, current.path == "/search" {
+                    baseLensURL = current
                 }
             }
         }
@@ -5334,6 +5430,68 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             showLoadingOverlay(status: "Asking AI…")
             webView.load(URLRequest(url: url))
         }
+    }
+
+    private func handleResultsModeChanged(_ idx: Int) {
+        let isLensTab = (idx == 1)
+        webOuterCard.isHidden = !isLensTab
+        if isLensTab && !hasTriggeredLensUpload {
+            triggerLazyLensUpload()
+        }
+    }
+
+    private func triggerLazyLensUpload() {
+        guard !hasTriggeredLensUpload else { return }
+        hasTriggeredLensUpload = true
+        let imgToSend = croppedCGImage
+        showLoadingOverlay(status: "Searching with \(AppSettings.shared.searchEngine.shortTitle)…")
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let existingCookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies()
+            do {
+                let upload = try await GoogleLensService.uploadImage(imgToSend, existingCookies: existingCookies)
+                self.loadLensResults(upload)
+            } catch {
+                self.showLensError(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc private func handleFollowUpSubmit() {
+        let q = followUpField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+        startAIExplanationStream(prompt: q, forceShow: true)
+    }
+
+    private func handleAddToContacts() {
+        if let email = currentDetectedEmails.first,
+           let url = URL(string: "mailto:\(email)") {
+            NSWorkspace.shared.open(url)
+        } else if let phone = currentDetectedPhones.first {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(phone, forType: .string)
+            onShowToast("Copied phone \(phone) — ready for Contacts")
+        }
+    }
+
+    private func handleAddToCalendar() {
+        if let firstDate = currentDetectedDates.first {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .short
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(formatter.string(from: firstDate), forType: .string)
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Calendar.app"))
+            onShowToast("Opened Calendar • Date copied")
+        }
+    }
+
+    private func handleCopyTable() {
+        let payload = currentTableTSV ?? currentTableCSV ?? ""
+        guard !payload.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(payload, forType: .string)
+        onShowToast("Copied table as TSV")
     }
 
     private func scrollWebResults(toVisualMatches: Bool) {
