@@ -3320,8 +3320,6 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
     private var heroCard: NSView!
     private var searchBarContainer: AdaptiveSurfaceView!
-    private var askAIButton: LiquidGlassButton!
-    private var heroAskSpacerRef: NSView!
     private var searchField: NSTextField!
     private var snippetPreviewLabel: NSTextField!
     private var snippetCopyButton: LiquidGlassButton!
@@ -4018,34 +4016,6 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             searchInputStack.centerYAnchor.constraint(equalTo: searchBarContainer.centerYAnchor)
         ])
 
-        askAIButton = LiquidGlassButton(
-            symbol: "sparkles",
-            symbolPointSize: 11.5,
-            symbolWeight: .semibold,
-            title: "Ask AI",
-            tooltip: "Ask AI about this selection",
-            height: 30,
-            minWidth: 96,
-            style: .clear,
-            tintColor: NSColor(red: 0.24, green: 0.34, blue: 0.92, alpha: 0.62),
-            lightTintColor: NSColor(red: 0.28, green: 0.40, blue: 0.96, alpha: 0.80),
-            foregroundColor: .white,
-            font: .systemFont(ofSize: 12, weight: .semibold)
-        ) { [weak self] in
-            self?.handleAskAIButtonTapped()
-        }
-        askAIButton.setContentHuggingPriority(.required, for: .horizontal)
-        askAIButton.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        let heroAskSpacer = NSView()
-        heroAskSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        heroAskSpacerRef = heroAskSpacer
-
-        let heroInputRow = NSStackView(views: [searchBarContainer, askAIButton, heroAskSpacer])
-        heroInputRow.orientation = .horizontal
-        heroInputRow.alignment = .centerY
-        heroInputRow.spacing = 8
-
         snippetPreviewLabel = NSTextField(labelWithString: "Analyzing selection…")
         snippetPreviewLabel.font = .systemFont(ofSize: 12, weight: .medium)
         snippetPreviewLabel.textColor = NSColor.labelColor.withAlphaComponent(0.84)
@@ -4083,12 +4053,12 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         snippetRow.spacing = 8
         snippetRowRef = snippetRow
 
-        let heroRightStack = NSStackView(views: [heroInputRow, snippetRow])
+        let heroRightStack = NSStackView(views: [searchBarContainer, snippetRow])
         heroRightStack.orientation = .vertical
         heroRightStack.alignment = .leading
         heroRightStack.spacing = 5
         heroRightStack.translatesAutoresizingMaskIntoConstraints = false
-        heroInputRow.widthAnchor.constraint(equalTo: heroRightStack.widthAnchor).isActive = true
+        searchBarContainer.widthAnchor.constraint(equalTo: heroRightStack.widthAnchor).isActive = true
         snippetRow.widthAnchor.constraint(equalTo: heroRightStack.widthAnchor).isActive = true
         heroRightStackRef = heroRightStack
 
@@ -4105,10 +4075,8 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
         heroCard.addSubview(heroMainStack)
 
-        // Lens tab uses compact "Ask AI" button instead of duplicating Google's search box
         searchBarContainer.isHidden = (initialTabIndex == 1)
-        askAIButton.isHidden = (initialTabIndex != 1)
-        heroAskSpacer.isHidden = (initialTabIndex != 1)
+        heroCard.isHidden = (initialTabIndex == 1)
 
         NSLayoutConstraint.activate([
             heroMainStack.leadingAnchor.constraint(equalTo: heroCard.leadingAnchor),
@@ -4914,6 +4882,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             snippetCopyButton.isHidden = true
             snippetRowRef.isHidden = true
         }
+        heroCard.isHidden = isLensSelected && snippetRowRef.isHidden
 
         // Auto-show Answer Card when Answer tab is selected, or when a Gemini key / math solution exists
         let hasCloudKey = !KeychainHelper.loadAPIKey().isEmpty
@@ -5021,13 +4990,6 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     @objc private func handleMenuOpenLens() {
         resultsModeSegmented?.setSelectedIndex(1, animated: true)
         handleResultsModeChanged(1)
-    }
-
-    private func handleAskAIButtonTapped() {
-        didRequestExplicitAnswer = true
-        resultsModeSegmented?.setSelectedIndex(0, animated: true)
-        handleResultsModeChanged(0)
-        window?.makeFirstResponder(searchField)
     }
 
     private func startAIExplanationStream(prompt: String, forceShow: Bool = false) {
@@ -5513,8 +5475,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         webOuterCard.isHidden = !isLensTab
         answerContextCard?.isHidden = isLensTab
         searchBarContainer.isHidden = isLensTab
-        askAIButton.isHidden = !isLensTab
-        heroAskSpacerRef.isHidden = !isLensTab
+        heroCard.isHidden = isLensTab && snippetRowRef.isHidden
 
         if isLensTab {
             aiAnswerCard.isHidden = shouldHideAnswerOnLensTab()

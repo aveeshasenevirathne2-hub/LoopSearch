@@ -150,11 +150,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         Task { @MainActor [weak self] in
+            let wasSignedIn = FirebaseAuthService.shared.isSignedIn
             await FirebaseAuthService.shared.restoreAndSyncOnLaunch()
             self?.rebuildMenu()
+            if wasSignedIn && !FirebaseAuthService.shared.isSignedIn {
+                self?.toastController.show(message: "Session expired — please sign in with Google", duration: 3.0)
+                OnboardingWindowController.shared.show { [weak self] in
+                    self?.triggerCircleToSearch()
+                }
+            }
         }
 
-        if !AppSettings.shared.hasCompletedOnboarding {
+        if !FirebaseAuthService.shared.isSignedIn || !AppSettings.shared.hasCompletedOnboarding {
             OnboardingWindowController.shared.show { [weak self] in
                 self?.triggerCircleToSearch()
             }
@@ -212,7 +219,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard !isOverlayOpen else { return true }
         if !flag {
-            if !AppSettings.shared.hasCompletedOnboarding {
+            if !FirebaseAuthService.shared.isSignedIn || !AppSettings.shared.hasCompletedOnboarding {
                 openOnboarding()
             } else {
                 openSettings()
@@ -275,7 +282,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        let triggerTitle = "Start LoopSearch (\(AppSettings.shared.activeHotkeyDisplayString))"
+        let triggerTitle = FirebaseAuthService.shared.isSignedIn
+            ? "Start LoopSearch (\(AppSettings.shared.activeHotkeyDisplayString))"
+            : "Sign In with Google to Start LoopSearch"
         let triggerItem = NSMenuItem(
             title: triggerTitle,
             action: #selector(triggerFromMenu),
@@ -313,8 +322,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(accountRoot)
         } else {
             let signInItem = NSMenuItem(
-                title: "Sign In with Google (Optional)…",
-                action: #selector(switchGoogleAccount),
+                title: "Sign In with Google… (Required)",
+                action: #selector(openSignInGate),
                 keyEquivalent: ""
             )
             signInItem.target = self
@@ -536,6 +545,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         FirebaseAuthService.shared.signOut()
         rebuildMenu()
         toastController.show(message: "Signed out of Google Account")
+        OnboardingWindowController.shared.show { [weak self] in
+            self?.triggerCircleToSearch()
+        }
     }
 
     @objc private func selectHotkeyPreset(_ sender: NSMenuItem) {
@@ -756,7 +768,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @discardableResult
     private func ensureSignedInOrPrompt() -> Bool {
-        // No account required — user can search immediately once Screen Recording permission is granted.
+        guard FirebaseAuthService.shared.isSignedIn else {
+            toastController.show(message: "Sign in with Google is required to use LoopSearch", duration: 3.0)
+            OnboardingWindowController.shared.show { [weak self] in
+                self?.triggerCircleToSearch()
+            }
+            return false
+        }
         return true
     }
 }
