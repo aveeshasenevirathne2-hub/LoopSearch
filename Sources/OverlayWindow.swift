@@ -2515,66 +2515,100 @@ private final class OverlayCanvasView: NSView {
     }
 
     private func computeSheetFrame(avoiding rect: CGRect) -> CGRect {
-        let gap: CGFloat = 22
+        let gap: CGFloat = 16
         let usableLeft = safeInsets.left
         let usableRight = bounds.width - safeInsets.right
         let usableTop = safeInsets.top
         let usableBottom = bounds.height - safeInsets.bottom
-        let usableWidth = max(420, usableRight - usableLeft)
-        let usableHeight = max(420, usableBottom - usableTop)
+        let usableWidth = max(360, usableRight - usableLeft)
+        let usableHeight = max(360, usableBottom - usableTop)
 
-        let spaceBelow = usableBottom - rect.maxY - gap
-        let spaceAbove = rect.minY - usableTop - gap
-        let spaceRight = usableRight - rect.maxX - gap
-        let spaceLeft = rect.minX - usableLeft - gap
+        let spaceRight = usableRight - (rect.maxX + gap)
+        let spaceLeft = (rect.minX - gap) - usableLeft
+        let spaceBelow = usableBottom - (rect.maxY + gap)
+        let spaceAbove = (rect.minY - gap) - usableTop
 
-        var candidates: [(rect: CGRect, score: CGFloat)] = []
-        let sideHeight = min(620, usableHeight * 0.88)
+        let sideHeight = min(640, usableHeight * 0.90)
         let vertWidth = min(760, usableWidth)
 
-        if spaceRight >= 520 {
+        var candidates: [(rect: CGRect, isBeside: Bool, room: CGFloat, area: CGFloat)] = []
+
+        if spaceRight >= 360 {
             let w = min(760, spaceRight)
             let rawY = rect.midY - sideHeight / 2
             let y = max(usableTop, min(usableBottom - sideHeight, rawY))
-            let x = min(usableRight - w, rect.maxX + gap)
-            let bonus: CGFloat = (w >= 720) ? 1.35 : 1.12
-            candidates.append((CGRect(x: x, y: y, width: w, height: sideHeight), w * sideHeight * bonus))
+            let x = rect.maxX + gap
+            let frame = CGRect(x: x, y: y, width: w, height: sideHeight)
+            candidates.append((frame, true, spaceRight, w * sideHeight))
         }
 
-        if spaceLeft >= 520 {
+        if spaceLeft >= 360 {
             let w = min(760, spaceLeft)
             let rawY = rect.midY - sideHeight / 2
             let y = max(usableTop, min(usableBottom - sideHeight, rawY))
-            let x = max(usableLeft, rect.minX - gap - w)
-            let bonus: CGFloat = (w >= 720) ? 1.30 : 1.08
-            candidates.append((CGRect(x: x, y: y, width: w, height: sideHeight), w * sideHeight * bonus))
+            let x = rect.minX - gap - w
+            let frame = CGRect(x: x, y: y, width: w, height: sideHeight)
+            candidates.append((frame, true, spaceLeft, w * sideHeight))
         }
 
-        if spaceBelow >= 360 {
-            let h = min(620, spaceBelow)
+        if spaceBelow >= 300 {
+            let h = min(640, spaceBelow)
             let rawX = rect.midX - vertWidth / 2
             let x = max(usableLeft, min(usableRight - vertWidth, rawX))
-            let y = min(usableBottom - h, rect.maxY + gap)
-            candidates.append((CGRect(x: x, y: y, width: vertWidth, height: h), vertWidth * h * 1.05))
+            let y = rect.maxY + gap
+            let frame = CGRect(x: x, y: y, width: vertWidth, height: h)
+            candidates.append((frame, false, spaceBelow, vertWidth * h))
         }
 
-        if spaceAbove >= 360 {
-            let h = min(620, spaceAbove)
+        if spaceAbove >= 300 {
+            let h = min(640, spaceAbove)
             let rawX = rect.midX - vertWidth / 2
             let x = max(usableLeft, min(usableRight - vertWidth, rawX))
-            let y = max(usableTop, rect.minY - gap - h)
-            candidates.append((CGRect(x: x, y: y, width: vertWidth, height: h), vertWidth * h))
+            let y = rect.minY - gap - h
+            let frame = CGRect(x: x, y: y, width: vertWidth, height: h)
+            candidates.append((frame, false, spaceAbove, vertWidth * h))
         }
 
-        if let best = candidates.max(by: { $0.score < $1.score }) {
-            return best.rect
+        // Prefer beside the selection on whichever left/right side has more room whenever a side-docked panel fits nicely.
+        let besideCandidates = candidates.filter { $0.isBeside }
+        if let bestBeside = besideCandidates.max(by: { $0.room < $1.room }) {
+            let bestVertical = candidates.filter { !$0.isBeside }.max(by: { $0.room < $1.room })
+            if bestBeside.rect.width >= 460 || bestVertical == nil {
+                return bestBeside.rect
+            }
+            if let v = bestVertical, v.room < 400 || bestBeside.area >= v.area * 0.72 {
+                return bestBeside.rect
+            }
+            if let v = bestVertical {
+                return v.rect
+            }
         }
 
-        let w = min(760, max(520, usableWidth * 0.90))
-        let h = min(620, usableHeight * 0.88)
-        let x = max(usableLeft, usableRight - w)
-        let y = max(usableTop, usableBottom - h)
-        return CGRect(x: x, y: y, width: w, height: h)
+        if let bestVertical = candidates.filter({ !$0.isBeside }).max(by: { $0.room < $1.room }) {
+            return bestVertical.rect
+        }
+
+        // Last-resort non-overlapping fit for huge selections covering most of the screen
+        let tightRight = max(0, usableRight - (rect.maxX + gap))
+        let tightLeft = max(0, (rect.minX - gap) - usableLeft)
+        let tightBelow = max(0, usableBottom - (rect.maxY + gap))
+        let tightAbove = max(0, (rect.minY - gap) - usableTop)
+        let maxSide = max(tightRight, tightLeft)
+        let maxVert = max(tightBelow, tightAbove)
+        if maxSide >= 280 || maxSide >= maxVert {
+            let w = min(760, max(min(maxSide, 760), 340))
+            let x = (tightRight >= tightLeft)
+                ? min(usableRight - w, rect.maxX + gap)
+                : max(usableLeft, rect.minX - gap - w)
+            let y = max(usableTop, min(usableBottom - sideHeight, rect.midY - sideHeight / 2))
+            return CGRect(x: x, y: y, width: min(w, usableWidth), height: sideHeight)
+        }
+        let h = min(620, max(280, maxVert))
+        let x = max(usableLeft, min(usableRight - vertWidth, rect.midX - vertWidth / 2))
+        let y = (tightBelow >= tightAbove)
+            ? min(usableBottom - h, rect.maxY + gap)
+            : max(usableTop, rect.minY - gap - h)
+        return CGRect(x: x, y: y, width: vertWidth, height: min(h, usableHeight))
     }
 
     private func copyImageToClipboard(_ image: CGImage) {
@@ -3286,6 +3320,8 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
     private var heroCard: NSView!
     private var searchBarContainer: AdaptiveSurfaceView!
+    private var askAIButton: LiquidGlassButton!
+    private var heroAskSpacerRef: NSView!
     private var searchField: NSTextField!
     private var snippetPreviewLabel: NSTextField!
     private var snippetCopyButton: LiquidGlassButton!
@@ -3302,8 +3338,14 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     private var colorHexChip: LiquidGlassButton!
 
     private var aiAnswerCard: LiquidGlassSurfaceView!
+    private var aiHeaderRowRef: NSStackView!
     private var aiAnswerLabel: NSTextField!
     private var aiCopyButton: LiquidGlassButton!
+    private var aiExpandButton: LiquidGlassButton!
+    private var aiMoreButton: LiquidGlassButton!
+    private var followUpContainerRef: AdaptiveSurfaceView!
+    private var isLensAnswerExpanded = false
+    private var didRequestExplicitAnswer = false
 
     private var emptySelectionCard: LiquidGlassSurfaceView!
     private var errorStateCard: LiquidGlassSurfaceView!
@@ -3320,228 +3362,15 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     private var shimmerLayer = CAGradientLayer()
     private var loadingFallbackTask: Task<Void, Never>?
 
-    private static func webColorSchemeScript(dark: Bool) -> String {
-        if !dark {
-            return """
-            (function() {
-                if (window.__ctsThemeObserver) {
-                    window.__ctsThemeObserver.disconnect();
-                    window.__ctsThemeObserver = null;
-                }
-                window.__ctsDarkEnabled = false;
-                var st = document.getElementById('cts-dark-theme-style');
-                if (st) st.remove();
-                document.documentElement.style.colorScheme = 'light';
-                var bgEls = document.querySelectorAll('[data-cts-dark-bg]');
-                for (var i = 0; i < bgEls.length; i++) {
-                    bgEls[i].style.removeProperty('background-color');
-                    bgEls[i].style.removeProperty('border-color');
-                    bgEls[i].removeAttribute('data-cts-dark-bg');
-                }
-                var imgEls = document.querySelectorAll('[data-cts-dark-bgi]');
-                for (var k = 0; k < imgEls.length; k++) {
-                    imgEls[k].style.removeProperty('background-image');
-                    imgEls[k].style.removeProperty('background');
-                    imgEls[k].removeAttribute('data-cts-dark-bgi');
-                }
-                var fgEls = document.querySelectorAll('[data-cts-dark-fg]');
-                for (var j = 0; j < fgEls.length; j++) {
-                    fgEls[j].style.removeProperty('color');
-                    fgEls[j].removeAttribute('data-cts-dark-fg');
-                }
-            })();
-            """
-        }
-        return """
-        (function() {
-            if (location.pathname.indexOf('/sorry') === 0) return;
-            window.__ctsDarkEnabled = true;
-            document.documentElement.style.colorScheme = 'dark';
-            var st = document.getElementById('cts-dark-theme-style');
-            if (!st) {
-                st = document.createElement('style');
-                st.id = 'cts-dark-theme-style';
-                st.textContent = `
-                    :root, html, body {
-                        color-scheme: dark !important;
-                        background-color: #0b0b0d !important;
-                        color: #e8eaed !important;
-                    }
-                    code, pre, kbd, samp, tt {
-                        background-color: rgba(32, 33, 36, 0.92) !important;
-                        color: #e8eaed !important;
-                        border-color: rgba(255, 255, 255, 0.14) !important;
-                    }
-                    mark, mark * {
-                        background-color: rgba(255, 255, 255, 0.12) !important;
-                        color: #e8eaed !important;
-                        border-radius: 4px !important;
-                    }
-                    code *, pre *, kbd *, samp * {
-                        background-color: transparent !important;
-                        color: inherit !important;
-                    }
-                    table, th, td, blockquote, details, summary {
-                        background-color: rgba(24, 25, 28, 0.92) !important;
-                        color: #e8eaed !important;
-                        border-color: rgba(255, 255, 255, 0.12) !important;
-                    }
-                    input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):not([type="range"]),
-                    textarea {
-                        background-color: transparent !important;
-                        background-image: none !important;
-                        color: #e8eaed !important;
-                        caret-color: #e8eaed !important;
-                        border-color: transparent !important;
-                        box-shadow: none !important;
-                        outline: none !important;
-                    }
-                    input::placeholder, textarea::placeholder {
-                        color: #9aa0a6 !important;
-                    }
-                    a:not([role="button"]), a:not([role="button"]) * {
-                        background-color: transparent !important;
-                        background-image: none !important;
-                    }
-                `;
-                (document.head || document.documentElement).appendChild(st);
-            }
-            function applyDarkPass() {
-                if (!window.__ctsDarkEnabled || !document.body) return;
-                var skipTags = { IMG:1, VIDEO:1, CANVAS:1, PICTURE:1, SOURCE:1, SVG:1, PATH:1, CIRCLE:1, RECT:1, POLYGON:1, SCRIPT:1, STYLE:1, LINK:1, META:1, NOSCRIPT:1, BR:1, HR:1, CODE:1, PRE:1, KBD:1, SAMP:1, MARK:1 };
-                var nodes = [document.body];
-                var all = document.body.getElementsByTagName('*');
-                for (var k = 0; k < all.length; k++) { nodes.push(all[k]); }
-                var vw = window.innerWidth || 420;
-                var vh = window.innerHeight || 640;
-                for (var i = 0; i < nodes.length; i++) {
-                    var el = nodes[i];
-                    if (skipTags[el.tagName]) continue;
-                    var cs = window.getComputedStyle(el);
-                    var bgi = cs.backgroundImage;
-                    if (bgi && bgi.indexOf('gradient(') !== -1 && bgi.indexOf('url(') === -1 && /(255|248|249|250|241|243|244|238|232|229)/.test(bgi)) {
-                        var hasMaskBg = (el.textContent || '').trim().length < 36 && el.querySelector('img, textarea, input') === null;
-                        if (hasMaskBg) {
-                            el.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(11, 11, 13, 0), rgba(11, 11, 13, 0.96))', 'important');
-                            el.setAttribute('data-cts-dark-bgi', '1');
-                        }
-                    }
-                    var isMediaWrap = el.querySelector('img, picture, video') !== null
-                        && (el.innerText || '').trim().length < 28
-                        && el.querySelector('textarea, input, [role="tab"]') === null;
-                    if (isMediaWrap && el.tagName !== 'BODY' && el.tagName !== 'MAIN') {
-                        el.style.setProperty('background-color', 'transparent', 'important');
-                        el.setAttribute('data-cts-dark-bg', '1');
-                        continue;
-                    }
-                    var bg = cs.backgroundColor;
-                    if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
-                        var m = bg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?\\)/);
-                        if (m) {
-                            var r = +m[1], g = +m[2], b = +m[3], a = m[4] !== undefined ? +m[4] : 1;
-                            var hasBorder = parseFloat(cs.borderTopWidth) > 0.2 || parseFloat(cs.borderBottomWidth) > 0.2 || parseFloat(cs.borderLeftWidth) > 0.2 || parseFloat(cs.borderRightWidth) > 0.2;
-                            if ((el.tagName === 'SPAN' || el.tagName === 'EM') && a > 0.15 && b > 135 && (b - r) > 38 && g < 195) {
-                                var wrapsLink = el.querySelector('a') !== null || el.closest('a') !== null;
-                                el.style.setProperty('background-color', wrapsLink ? 'transparent' : 'rgba(255, 255, 255, 0.10)', 'important');
-                                el.setAttribute('data-cts-dark-bg', '1');
-                            } else if (a > 0.12 && r > 155 && g > 155 && b > 155) {
-                                var isRoot = (el.tagName === 'BODY' || el.tagName === 'MAIN');
-                                el.style.setProperty('background-color', isRoot ? '#0b0b0d' : 'rgba(24, 25, 28, 0.94)', 'important');
-                                if (hasBorder) {
-                                    el.style.setProperty('border-color', 'rgba(255, 255, 255, 0.12)', 'important');
-                                }
-                                el.setAttribute('data-cts-dark-bg', '1');
-                            } else if (a > 0.72 && Math.max(r, g, b) <= 52 && (Math.max(r, g, b) - Math.min(r, g, b)) <= 10) {
-                                var rect = el.getBoundingClientRect();
-                                if (rect.width >= vw * 0.84) {
-                                    el.style.setProperty('background-color', '#0b0b0d', 'important');
-                                    el.setAttribute('data-cts-dark-bg', '1');
-                                }
-                            }
-                        }
-                    }
-                    var fg = cs.color;
-                    if (fg) {
-                        var fm = fg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
-                        if (fm) {
-                            var fr = +fm[1], fgv = +fm[2], fb = +fm[3];
-                            if (Math.max(fr, fgv, fb) < 168) {
-                                var isSecondary = Math.min(fr, fgv, fb) > 78;
-                                el.style.setProperty('color', isSecondary ? '#9aa0a6' : '#e8eaed', 'important');
-                                el.setAttribute('data-cts-dark-fg', '1');
-                            }
-                        }
-                    }
-                }
-                // Keep bottom AI Mode composer dock clean and opaque so scrolled text never bleeds behind it
-                var composers = document.querySelectorAll('textarea, input[type="text"], input:not([type])');
-                for (var c = 0; c < composers.length; c++) {
-                    var inp = composers[c];
-                    var ir = inp.getBoundingClientRect();
-                    if (ir.width < 120 || ir.bottom < vh * 0.52) continue;
-                    var pill = inp.closest('form') || inp.parentElement;
-                    var p = inp.parentElement;
-                    for (var up = 0; up < 4 && p && p !== document.body; up++) {
-                        var pr = p.getBoundingClientRect();
-                        if (pr.width >= 200 && pr.height >= 42 && pr.height <= 170) {
-                            pill = p;
-                        }
-                        p = p.parentElement;
-                    }
-                    if (pill) {
-                        pill.style.setProperty('background-color', 'rgba(24, 25, 28, 0.96)', 'important');
-                        pill.style.setProperty('border', '1px solid rgba(255, 255, 255, 0.14)', 'important');
-                        pill.style.setProperty('border-radius', '20px', 'important');
-                        pill.style.setProperty('box-shadow', '0 4px 18px rgba(0, 0, 0, 0.35)', 'important');
-                        pill.style.setProperty('overflow', 'hidden', 'important');
-                        pill.setAttribute('data-cts-keep', '1');
-                    }
-                    var dock = pill ? pill.parentElement : null;
-                    while (dock && dock !== document.body) {
-                        var dcs = window.getComputedStyle(dock);
-                        if (dcs.position === 'fixed' || dcs.position === 'sticky') {
-                            dock.style.setProperty('background-color', '#090e1a', 'important');
-                            dock.style.setProperty('background-image', 'linear-gradient(to bottom, rgba(9, 14, 26, 0.92), #090e1a 16px)', 'important');
-                            dock.style.setProperty('padding-top', '6px', 'important');
-                            dock.setAttribute('data-cts-keep', '1');
-                            break;
-                        }
-                        dock = dock.parentElement;
-                    }
-                }
-            }
-            applyDarkPass();
-            if (!window.__ctsThemeObserver && document.body) {
-                var queued = false;
-                window.__ctsThemeObserver = new MutationObserver(function() {
-                    if (!window.__ctsDarkEnabled || queued) return;
-                    queued = true;
-                    requestAnimationFrame(function() {
-                        queued = false;
-                        applyDarkPass();
-                    });
-                });
-                window.__ctsThemeObserver.observe(document.body, { childList: true, subtree: true });
-            }
-        })();
-        """
-    }
-
     private var isEffectiveDarkMode: Bool {
-        switch AppSettings.shared.webResultsTheme {
+        switch AppSettings.shared.theme {
         case .dark:
             return true
         case .light:
             return false
         case .system:
-            switch AppSettings.shared.theme {
-            case .dark:
-                return true
-            case .light:
-                return false
-            case .system:
-                return effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            }
+            let appAppearance = window?.effectiveAppearance ?? NSApp.effectiveAppearance
+            return appAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         }
     }
 
@@ -3564,14 +3393,12 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         aiStreamingTask?.cancel()
         stopLoaderAnimations()
         webView?.stopLoading()
-        webView?.evaluateJavaScript(
-            """
-            if(window.__ctsThemeObserver){window.__ctsThemeObserver.disconnect();window.__ctsThemeObserver=null;}
-            if(window.__ctsCleanObserver){window.__ctsCleanObserver.disconnect();window.__ctsCleanObserver=null;}
-            """,
-            completionHandler: nil
-        )
         webView?.loadHTMLString("", baseURL: nil)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        syncWebViewAppearance()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -3847,8 +3674,8 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             guard let self else { return }
             let maxAllowedW = max(920, (self.superview?.bounds.width ?? 1440) - 24)
             let maxAllowedH = max(760, (self.superview?.bounds.height ?? 960) - 48)
-            let newW = max(520, min(maxAllowedW, self.frame.width + delta.width))
-            let newH = max(420, min(maxAllowedH, self.frame.height + delta.height))
+            let newW = max(360, min(maxAllowedW, self.frame.width + delta.width))
+            let newH = max(340, min(maxAllowedH, self.frame.height + delta.height))
             let newOriginY = self.frame.maxY - newH
             let allowed = self.allowedOrigins(CGSize(width: newW, height: newH))
             let clampedX = max(allowed.minX, min(allowed.maxX, self.frame.origin.x))
@@ -4191,9 +4018,37 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
             searchInputStack.centerYAnchor.constraint(equalTo: searchBarContainer.centerYAnchor)
         ])
 
+        askAIButton = LiquidGlassButton(
+            symbol: "sparkles",
+            symbolPointSize: 11.5,
+            symbolWeight: .semibold,
+            title: "Ask AI",
+            tooltip: "Ask AI about this selection",
+            height: 30,
+            minWidth: 96,
+            style: .clear,
+            tintColor: NSColor(red: 0.24, green: 0.34, blue: 0.92, alpha: 0.62),
+            lightTintColor: NSColor(red: 0.28, green: 0.40, blue: 0.96, alpha: 0.80),
+            foregroundColor: .white,
+            font: .systemFont(ofSize: 12, weight: .semibold)
+        ) { [weak self] in
+            self?.handleAskAIButtonTapped()
+        }
+        askAIButton.setContentHuggingPriority(.required, for: .horizontal)
+        askAIButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let heroAskSpacer = NSView()
+        heroAskSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        heroAskSpacerRef = heroAskSpacer
+
+        let heroInputRow = NSStackView(views: [searchBarContainer, askAIButton, heroAskSpacer])
+        heroInputRow.orientation = .horizontal
+        heroInputRow.alignment = .centerY
+        heroInputRow.spacing = 8
+
         snippetPreviewLabel = NSTextField(labelWithString: "Analyzing selection…")
-        snippetPreviewLabel.font = .systemFont(ofSize: 11.5, weight: .regular)
-        snippetPreviewLabel.textColor = .secondaryLabelColor
+        snippetPreviewLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        snippetPreviewLabel.textColor = NSColor.labelColor.withAlphaComponent(0.84)
         snippetPreviewLabel.usesSingleLineMode = false
         snippetPreviewLabel.lineBreakMode = .byTruncatingTail
         snippetPreviewLabel.maximumNumberOfLines = 2
@@ -4204,21 +4059,21 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
         snippetCopyButton = LiquidGlassButton(
             symbol: "doc.on.doc",
-            symbolPointSize: 10,
+            symbolPointSize: 10.5,
             symbolWeight: .semibold,
             title: "Copy",
             tooltip: "Copy Recognized Text (⌘C)",
-            height: 22,
-            minWidth: 58,
+            height: 24,
+            minWidth: 62,
             style: .regular,
             foregroundColor: .labelColor,
-            font: .systemFont(ofSize: 10.5, weight: .semibold)
+            font: .systemFont(ofSize: 11.5, weight: .semibold)
         ) { [weak self] in
             self?.handleCopyText()
         }
         snippetCopyButton.setContentHuggingPriority(.required, for: .horizontal)
         snippetCopyButton.setContentCompressionResistancePriority(.required, for: .horizontal)
-        snippetCopyButton.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        snippetCopyButton.widthAnchor.constraint(equalToConstant: 64).isActive = true
         snippetCopyButton.isHidden = true
 
         let snippetRow = NSStackView(views: [snippetPreviewLabel, snippetCopyButton])
@@ -4228,12 +4083,12 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         snippetRow.spacing = 8
         snippetRowRef = snippetRow
 
-        let heroRightStack = NSStackView(views: [searchBarContainer, snippetRow])
+        let heroRightStack = NSStackView(views: [heroInputRow, snippetRow])
         heroRightStack.orientation = .vertical
         heroRightStack.alignment = .leading
-        heroRightStack.spacing = 4
+        heroRightStack.spacing = 5
         heroRightStack.translatesAutoresizingMaskIntoConstraints = false
-        searchBarContainer.widthAnchor.constraint(equalTo: heroRightStack.widthAnchor).isActive = true
+        heroInputRow.widthAnchor.constraint(equalTo: heroRightStack.widthAnchor).isActive = true
         snippetRow.widthAnchor.constraint(equalTo: heroRightStack.widthAnchor).isActive = true
         heroRightStackRef = heroRightStack
 
@@ -4249,6 +4104,11 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         heroRightStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         searchField.widthAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
         heroCard.addSubview(heroMainStack)
+
+        // Lens tab uses compact "Ask AI" button instead of duplicating Google's search box
+        searchBarContainer.isHidden = (initialTabIndex == 1)
+        askAIButton.isHidden = (initialTabIndex != 1)
+        heroAskSpacer.isHidden = (initialTabIndex != 1)
 
         NSLayoutConstraint.activate([
             heroMainStack.leadingAnchor.constraint(equalTo: heroCard.leadingAnchor),
@@ -4370,7 +4230,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         aiIcon.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         aiAnswerLabel = NSTextField(labelWithString: "Generating answer…")
-        aiAnswerLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
+        aiAnswerLabel.font = .systemFont(ofSize: 12.5, weight: .medium)
         aiAnswerLabel.textColor = .labelColor
         aiAnswerLabel.usesSingleLineMode = false
         aiAnswerLabel.lineBreakMode = .byTruncatingTail
@@ -4380,55 +4240,79 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         aiAnswerLabel.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         aiAnswerLabel.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(120), for: .horizontal)
 
+        aiExpandButton = LiquidGlassButton(
+            symbol: "chevron.down",
+            symbolPointSize: 10.5,
+            symbolWeight: .semibold,
+            title: "Expand",
+            tooltip: "Expand or collapse answer",
+            height: 24,
+            minWidth: 74,
+            style: .regular,
+            foregroundColor: .labelColor,
+            font: .systemFont(ofSize: 11.5, weight: .medium)
+        ) { [weak self] in
+            self?.toggleLensAnswerExpanded()
+        }
+        aiExpandButton.setContentHuggingPriority(.required, for: .horizontal)
+        aiExpandButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        aiMoreButton = LiquidGlassButton(
+            symbol: "ellipsis",
+            symbolPointSize: 11,
+            symbolWeight: .semibold,
+            title: "More",
+            tooltip: "Summarize, Key points, and more",
+            height: 24,
+            minWidth: 66,
+            style: .regular,
+            foregroundColor: .labelColor,
+            font: .systemFont(ofSize: 11.5, weight: .medium)
+        ) { [weak self] in
+            self?.showAIAnswerMoreMenu()
+        }
+        aiMoreButton.setContentHuggingPriority(.required, for: .horizontal)
+        aiMoreButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
         aiCopyButton = LiquidGlassButton(
             symbol: "doc.on.doc",
-            symbolPointSize: 9.5,
+            symbolPointSize: 10.5,
             symbolWeight: .semibold,
             title: "Copy",
             tooltip: "Copy AI Answer",
-            height: 22,
-            minWidth: 58,
+            height: 24,
+            minWidth: 60,
             style: .regular,
             foregroundColor: .labelColor,
-            font: .systemFont(ofSize: 10.5, weight: .semibold)
+            font: .systemFont(ofSize: 11.5, weight: .semibold)
         ) { [weak self] in
             self?.handleCopyAIExplanation()
         }
         aiCopyButton.setContentHuggingPriority(.required, for: .horizontal)
         aiCopyButton.setContentCompressionResistancePriority(.required, for: .horizontal)
-        aiCopyButton.widthAnchor.constraint(equalToConstant: 60).isActive = true
 
         let hasKeyConfigured = !KeychainHelper.loadAPIKey().isEmpty
         aiSourceBadgeLabel = NSTextField(labelWithString: hasKeyConfigured ? "Gemini answer · may be wrong" : "On-device answer · may be wrong")
-        aiSourceBadgeLabel.font = .systemFont(ofSize: 10.0, weight: .semibold)
-        aiSourceBadgeLabel.textColor = .secondaryLabelColor
+        aiSourceBadgeLabel.font = .systemFont(ofSize: 12.0, weight: .medium)
+        aiSourceBadgeLabel.textColor = NSColor.labelColor.withAlphaComponent(0.76)
 
-        let aiStack = NSStackView(views: [aiIcon, aiAnswerLabel, aiCopyButton])
+        let aiHeaderRow = NSStackView(views: [aiSourceBadgeLabel])
+        aiHeaderRow.orientation = .horizontal
+        aiHeaderRow.alignment = .centerY
+        aiHeaderRow.spacing = 6
+        aiHeaderRowRef = aiHeaderRow
+
+        let aiStack = NSStackView(views: [aiIcon, aiAnswerLabel, aiExpandButton, aiMoreButton, aiCopyButton])
         aiStack.orientation = .horizontal
         aiStack.alignment = .centerY
         aiStack.distribution = .fill
-        aiStack.spacing = 8
-
-        let suggest1 = makeGlassChip(title: "Summarize", symbol: "text.alignleft") { [weak self] in
-            self?.startAIExplanationStream(prompt: "Summarize this concisely in 2 sentences.", forceShow: true)
-        }
-        let suggest2 = makeGlassChip(title: "Key points", symbol: "list.bullet") { [weak self] in
-            self?.startAIExplanationStream(prompt: "List the key factual points shown here.", forceShow: true)
-        }
-        let suggest3 = makeGlassChip(title: "Open Lens", symbol: "globe") { [weak self] in
-            self?.resultsModeSegmented?.setSelectedIndex(1, animated: true)
-            self?.handleResultsModeChanged(1)
-        }
-        let suggestedRow = NSStackView(views: [suggest1, suggest2, suggest3])
-        suggestedRow.orientation = .horizontal
-        suggestedRow.alignment = .centerY
-        suggestedRow.spacing = 6
+        aiStack.spacing = 7
 
         followUpField = NSTextField()
         followUpField.isBezeled = false
         followUpField.drawsBackground = false
         followUpField.focusRingType = .none
-        followUpField.font = .systemFont(ofSize: 11.5, weight: .regular)
+        followUpField.font = .systemFont(ofSize: 12.0, weight: .regular)
         followUpField.textColor = .labelColor
         followUpField.placeholderString = "Ask a follow-up question…"
         followUpField.target = self
@@ -4445,14 +4329,15 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         followUpContainer.translatesAutoresizingMaskIntoConstraints = false
         followUpField.translatesAutoresizingMaskIntoConstraints = false
         followUpContainer.addSubview(followUpField)
+        followUpContainerRef = followUpContainer
         NSLayoutConstraint.activate([
-            followUpContainer.heightAnchor.constraint(equalToConstant: 28),
+            followUpContainer.heightAnchor.constraint(equalToConstant: 30),
             followUpField.leadingAnchor.constraint(equalTo: followUpContainer.leadingAnchor, constant: 10),
             followUpField.trailingAnchor.constraint(equalTo: followUpContainer.trailingAnchor, constant: -10),
             followUpField.centerYAnchor.constraint(equalTo: followUpContainer.centerYAnchor)
         ])
 
-        let aiCardBodyStack = NSStackView(views: [aiSourceBadgeLabel, aiStack, suggestedRow, followUpContainer])
+        let aiCardBodyStack = NSStackView(views: [aiHeaderRow, aiStack, followUpContainer])
         aiCardBodyStack.orientation = .vertical
         aiCardBodyStack.alignment = .leading
         aiCardBodyStack.spacing = 6
@@ -4461,6 +4346,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         NSLayoutConstraint.activate([
             followUpContainer.widthAnchor.constraint(equalTo: aiCardBodyStack.widthAnchor),
             aiStack.widthAnchor.constraint(equalTo: aiCardBodyStack.widthAnchor),
+            aiHeaderRow.widthAnchor.constraint(equalTo: aiCardBodyStack.widthAnchor),
             aiCardBodyStack.leadingAnchor.constraint(equalTo: aiAnswerCard.contentContainer.leadingAnchor, constant: 10),
             aiCardBodyStack.trailingAnchor.constraint(equalTo: aiAnswerCard.contentContainer.trailingAnchor, constant: -8),
             aiCardBodyStack.topAnchor.constraint(equalTo: aiAnswerCard.contentContainer.topAnchor, constant: 7),
@@ -4469,6 +4355,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         rootStack.addArrangedSubview(aiAnswerCard)
         aiAnswerCard.widthAnchor.constraint(equalTo: rootStack.widthAnchor).isActive = true
         aiAnswerCard.setContentCompressionResistancePriority(.required, for: .vertical)
+        refreshAnswerCardChrome()
 
         answerContextCard = LiquidGlassSurfaceView(
             cornerRadius: 14,
@@ -4544,7 +4431,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         errorStateCard.translatesAutoresizingMaskIntoConstraints = false
 
         errorStateTitleLabel = NSTextField(labelWithString: "Lens didn’t load. Open in browser or try another search engine.")
-        errorStateTitleLabel.font = .systemFont(ofSize: 11.5, weight: .semibold)
+        errorStateTitleLabel.font = .systemFont(ofSize: 12.0, weight: .semibold)
         errorStateTitleLabel.textColor = .labelColor
         errorStateTitleLabel.lineBreakMode = .byTruncatingTail
 
@@ -4703,8 +4590,8 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         searchTitleLabel.textColor = .labelColor
 
         loadingStatusLabel = NSTextField(labelWithString: "Scanning visual space…")
-        loadingStatusLabel.font = .systemFont(ofSize: 11.5, weight: .medium)
-        loadingStatusLabel.textColor = NSColor(red: 0.58, green: 0.84, blue: 1.0, alpha: 0.86)
+        loadingStatusLabel.font = .systemFont(ofSize: 12.0, weight: .medium)
+        loadingStatusLabel.textColor = NSColor(red: 0.64, green: 0.88, blue: 1.0, alpha: 0.92)
         loadingStatusLabel.wantsLayer = true
 
         let headerStatusStack = NSStackView(views: [searchTitleLabel, loadingStatusLabel])
@@ -4793,12 +4680,15 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         loaderHorizonPeakLayer.opacity = isDarkAppearance ? 0.95 : 0.22
         CATransaction.commit()
 
+        grabHandleView.isHidden = bounds.width < 460
         if let rightStack = heroRightStackRef {
-            let copySpace: CGFloat = snippetCopyButton.isHidden ? 4 : 68
+            let copySpace: CGFloat = snippetCopyButton.isHidden ? 4 : 72
             snippetPreviewLabel.preferredMaxLayoutWidth = max(110, rightStack.bounds.width - copySpace)
         }
         if !aiAnswerCard.isHidden {
-            aiAnswerLabel.preferredMaxLayoutWidth = max(120, aiAnswerCard.bounds.width - 104)
+            let isLensTab = (resultsModeSegmented?.selectedIndex ?? 1) == 1
+            let trailingReserve: CGFloat = (isLensTab && !isLensAnswerExpanded) ? 186 : (isLensTab ? 246 : 168)
+            aiAnswerLabel.preferredMaxLayoutWidth = max(120, aiAnswerCard.bounds.width - trailingReserve)
         }
         updateChipsScrollContentSize()
     }
@@ -4918,7 +4808,7 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         webOuterCard.isHidden = false
         if isLowInfoSelection {
             isLowInfoSelection = false
-            snippetPreviewLabel.textColor = .secondaryLabelColor
+            snippetPreviewLabel.textColor = NSColor.labelColor.withAlphaComponent(0.84)
             if snippetPreviewLabel.stringValue.hasPrefix("Not much here") {
                 snippetPreviewLabel.stringValue = ""
                 snippetRowRef.isHidden = true
@@ -5012,16 +4902,8 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
         if !preview.isEmpty && AppSettings.shared.showInlineOCR {
             snippetPreviewLabel.stringValue = preview
-            snippetPreviewLabel.textColor = .secondaryLabelColor
+            snippetPreviewLabel.textColor = NSColor.labelColor.withAlphaComponent(0.84)
             snippetPreviewLabel.toolTip = result.text
-            snippetPreviewLabel.isHidden = false
-            snippetCopyButton.isHidden = true
-            snippetRowRef.isHidden = false
-        } else if !result.classificationLabels.isEmpty {
-            let subjectTags = result.classificationLabels.prefix(3).map { $0.capitalized }.joined(separator: " · ")
-            snippetPreviewLabel.stringValue = subjectTags
-            snippetPreviewLabel.textColor = .secondaryLabelColor
-            snippetPreviewLabel.toolTip = nil
             snippetPreviewLabel.isHidden = false
             snippetCopyButton.isHidden = true
             snippetRowRef.isHidden = false
@@ -5045,13 +4927,119 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         }
     }
 
+    private func shouldHideAnswerOnLensTab(candidateText: String? = nil) -> Bool {
+        if !KeychainHelper.loadAPIKey().isEmpty || currentMathSolution != nil || didRequestExplicitAnswer {
+            return false
+        }
+        let text = (candidateText ?? currentAIExplanation).trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = text.lowercased()
+        if text.isEmpty || lower.contains("not sure what this is") || lower.contains("check lens results") {
+            return true
+        }
+        let cleanOCR = currentPreviewText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasStrongOCR = cleanOCR.count >= 12 && currentOcrConfidence >= 0.45
+        if !hasStrongOCR && currentURL == nil {
+            return true
+        }
+        return false
+    }
+
+    private func refreshAnswerCardChrome() {
+        guard aiAnswerCard != nil, aiHeaderRowRef != nil else { return }
+        let isLensTab = (resultsModeSegmented?.selectedIndex ?? 1) == 1
+        let collapsed = isLensTab && !isLensAnswerExpanded
+
+        aiHeaderRowRef.isHidden = collapsed
+        followUpContainerRef?.isHidden = collapsed
+        aiCopyButton?.isHidden = collapsed
+        aiExpandButton?.isHidden = !isLensTab
+        aiMoreButton?.isHidden = false
+
+        if collapsed {
+            aiExpandButton?.title = "Expand"
+            aiExpandButton?.updateSymbol("chevron.down", pointSize: 10.5, weight: .semibold)
+            aiAnswerLabel.usesSingleLineMode = true
+            aiAnswerLabel.cell?.wraps = false
+            aiAnswerLabel.maximumNumberOfLines = 1
+        } else {
+            aiExpandButton?.title = "Collapse"
+            aiExpandButton?.updateSymbol("chevron.up", pointSize: 10.5, weight: .semibold)
+            aiAnswerLabel.usesSingleLineMode = false
+            aiAnswerLabel.cell?.wraps = true
+            aiAnswerLabel.maximumNumberOfLines = 6
+        }
+        needsLayout = true
+    }
+
+    private func toggleLensAnswerExpanded() {
+        isLensAnswerExpanded.toggle()
+        refreshAnswerCardChrome()
+    }
+
+    private func showAIAnswerMoreMenu() {
+        let menu = NSMenu(title: "Answer Options")
+
+        let sumItem = NSMenuItem(title: "Summarize", action: #selector(handleMenuSummarize), keyEquivalent: "")
+        sumItem.target = self
+        sumItem.image = NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil)
+        menu.addItem(sumItem)
+
+        let pointsItem = NSMenuItem(title: "Key points", action: #selector(handleMenuKeyPoints), keyEquivalent: "")
+        pointsItem.target = self
+        pointsItem.image = NSImage(systemSymbolName: "list.bullet", accessibilityDescription: nil)
+        menu.addItem(pointsItem)
+
+        let copyAnsItem = NSMenuItem(title: "Copy Answer", action: #selector(handleCopyAIExplanation), keyEquivalent: "")
+        copyAnsItem.target = self
+        copyAnsItem.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
+        menu.addItem(copyAnsItem)
+
+        if (resultsModeSegmented?.selectedIndex ?? 1) == 0 {
+            menu.addItem(.separator())
+            let lensItem = NSMenuItem(title: "Open Lens", action: #selector(handleMenuOpenLens), keyEquivalent: "")
+            lensItem.target = self
+            lensItem.image = NSImage(systemSymbolName: "globe", accessibilityDescription: nil)
+            menu.addItem(lensItem)
+        }
+
+        let pt = NSPoint(x: 0, y: aiMoreButton.bounds.height + 4)
+        menu.popUp(positioning: nil, at: pt, in: aiMoreButton)
+    }
+
+    @objc private func handleMenuSummarize() {
+        didRequestExplicitAnswer = true
+        isLensAnswerExpanded = true
+        startAIExplanationStream(prompt: "Summarize this concisely in 2 sentences.", forceShow: true)
+    }
+
+    @objc private func handleMenuKeyPoints() {
+        didRequestExplicitAnswer = true
+        isLensAnswerExpanded = true
+        startAIExplanationStream(prompt: "List the key factual points shown here.", forceShow: true)
+    }
+
+    @objc private func handleMenuOpenLens() {
+        resultsModeSegmented?.setSelectedIndex(1, animated: true)
+        handleResultsModeChanged(1)
+    }
+
+    private func handleAskAIButtonTapped() {
+        didRequestExplicitAnswer = true
+        resultsModeSegmented?.setSelectedIndex(0, animated: true)
+        handleResultsModeChanged(0)
+        window?.makeFirstResponder(searchField)
+    }
+
     private func startAIExplanationStream(prompt: String, forceShow: Bool = false) {
         aiStreamingTask?.cancel()
         let hasKey = !KeychainHelper.loadAPIKey().isEmpty
-        if hasKey || forceShow {
+        let isLensTab = (resultsModeSegmented?.selectedIndex ?? 1) == 1
+        let allowInitialShow = (hasKey || forceShow) && !(isLensTab && shouldHideAnswerOnLensTab(candidateText: currentAIExplanation))
+        if allowInitialShow {
+            refreshAnswerCardChrome()
             AppleMotion.animateVisibility(aiAnswerCard, visible: true, scale: 0.96, duration: 0.22)
             aiAnswerLabel.stringValue = "Generating answer…"
-        } else {
+        } else if isLensTab && shouldHideAnswerOnLensTab() {
             aiAnswerCard.isHidden = true
         }
 
@@ -5071,23 +5059,32 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
                 userQuery: (hasKey || forceShow) ? prompt : ""
             )
             guard !Task.isCancelled else { return }
-            if answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
                 AppleMotion.animateVisibility(self.aiAnswerCard, visible: false, scale: 0.96, duration: 0.18)
                 return
             }
+            self.currentAIExplanation = trimmed
+            self.aiAnswerLabel.toolTip = trimmed
+
+            let currentlyOnLens = (self.resultsModeSegmented?.selectedIndex ?? 1) == 1
+            if currentlyOnLens && self.shouldHideAnswerOnLensTab(candidateText: trimmed) {
+                self.aiAnswerCard.isHidden = true
+                return
+            }
+
+            self.refreshAnswerCardChrome()
             AppleMotion.animateVisibility(self.aiAnswerCard, visible: true, scale: 0.96, duration: 0.22)
-            self.currentAIExplanation = answer
-            self.aiAnswerLabel.toolTip = answer
 
             if AppSettings.shared.effectiveReduceMotion {
-                self.aiAnswerLabel.stringValue = answer
+                self.aiAnswerLabel.stringValue = trimmed
                 return
             }
 
             // Smooth streaming word-by-word reveal
-            let words = answer.split(separator: " ").map(String.init)
+            let words = trimmed.split(separator: " ").map(String.init)
             guard words.count > 1 else {
-                self.aiAnswerLabel.stringValue = answer
+                self.aiAnswerLabel.stringValue = trimmed
                 return
             }
             var built = ""
@@ -5293,17 +5290,16 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         engineParent.submenu = engineSubmenu
         menu.addItem(engineParent)
 
-        let webThemeSubmenu = NSMenu(title: "Web Results Mode")
+        let webThemeSubmenu = NSMenu(title: "Theme")
         for mode in AppTheme.allCases {
-            let title = (mode == .system) ? "Auto (Match App)" : mode.title
-            let item = NSMenuItem(title: title, action: #selector(handleSelectWebThemeFromMenu(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: mode.title, action: #selector(handleSelectWebThemeFromMenu(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = mode.rawValue
-            item.state = (AppSettings.shared.webResultsTheme == mode) ? .on : .off
+            item.state = (AppSettings.shared.theme == mode) ? .on : .off
             item.image = NSImage(systemSymbolName: mode.symbolName, accessibilityDescription: nil)
             webThemeSubmenu.addItem(item)
         }
-        let webThemeParent = NSMenuItem(title: "Web Results Theme", action: nil, keyEquivalent: "")
+        let webThemeParent = NSMenuItem(title: "Appearance Theme", action: nil, keyEquivalent: "")
         webThemeParent.image = NSImage(systemSymbolName: "circle.lefthalf.filled", accessibilityDescription: nil)
         webThemeParent.submenu = webThemeSubmenu
         menu.addItem(webThemeParent)
@@ -5334,16 +5330,17 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
 
     private func cycleWebResultsTheme() {
         let all = AppTheme.allCases
-        let current = AppSettings.shared.webResultsTheme
+        let current = AppSettings.shared.theme
         let nextIdx = ((all.firstIndex(of: current) ?? 0) + 1) % all.count
         applyWebResultsTheme(all[nextIdx])
     }
 
     private func applyWebResultsTheme(_ mode: AppTheme) {
+        AppSettings.shared.theme = mode
         AppSettings.shared.webResultsTheme = mode
         syncWebViewAppearance()
-        let label = (mode == .system) ? "Auto (\(isEffectiveDarkMode ? "Dark" : "Light"))" : "\(mode.title) Mode"
-        onShowToast("Results browser: \(label)")
+        let label = (mode == .system) ? "System (\(isEffectiveDarkMode ? "Dark" : "Light"))" : "\(mode.title) Mode"
+        onShowToast("Theme: \(label)")
     }
 
     private func showLoadingOverlay(status: String) {
@@ -5483,6 +5480,8 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     }
 
     @objc private func handleExplainSelection() {
+        didRequestExplicitAnswer = true
+        isLensAnswerExpanded = true
         let typed = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let contextText = currentPreviewText.trimmingCharacters(in: .whitespacesAndNewlines)
         let customPrompt = !typed.isEmpty
@@ -5513,10 +5512,21 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
         let isLensTab = (idx == 1)
         webOuterCard.isHidden = !isLensTab
         answerContextCard?.isHidden = isLensTab
-        aiAnswerCard.isHidden = isLensTab && currentAIExplanation.isEmpty && KeychainHelper.loadAPIKey().isEmpty && currentMathSolution == nil
-        if !isLensTab && aiAnswerCard.isHidden {
-            startAIExplanationStream(prompt: "Explain this selection concisely in 1 to 3 sentences.", forceShow: true)
+        searchBarContainer.isHidden = isLensTab
+        askAIButton.isHidden = !isLensTab
+        heroAskSpacerRef.isHidden = !isLensTab
+
+        if isLensTab {
+            aiAnswerCard.isHidden = shouldHideAnswerOnLensTab()
+        } else {
+            aiAnswerCard.isHidden = false
+            if currentAIExplanation.isEmpty {
+                startAIExplanationStream(prompt: "Explain this selection concisely in 1 to 3 sentences.", forceShow: true)
+            } else if aiAnswerLabel.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                aiAnswerLabel.stringValue = currentAIExplanation
+            }
         }
+        refreshAnswerCardChrome()
         if isLensTab && !hasTriggeredLensUpload {
             triggerLazyLensUpload()
         }
@@ -5542,6 +5552,8 @@ private final class GoogleResultsSheetView: NSView, WKNavigationDelegate, WKUIDe
     @objc private func handleFollowUpSubmit() {
         let q = followUpField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
+        didRequestExplicitAnswer = true
+        isLensAnswerExpanded = true
         startAIExplanationStream(prompt: q, forceShow: true)
     }
 
